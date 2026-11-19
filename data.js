@@ -1,0 +1,93 @@
+'use strict';
+/* Base de alimentos. Valores aproximados por 100 g (fuente: tablas tipo USDA).
+   [nombre, kcal, proteína, carbohidratos, grasas, gramos por unidad (opcional)] */
+const FOODS = [
+  // Proteínas animales
+  ['Pechuga de pollo (cocida)', 165, 31, 0, 3.6],
+  ['Pechuga de pollo (cruda)', 120, 22.5, 0, 2.6],
+  ['Muslo de pollo sin piel (cocido)', 209, 26, 0, 10.9],
+  ['Carne vacuna magra (cocida)', 217, 26, 0, 12],
+  ['Carne picada común (cocida)', 254, 26, 0, 17],
+  ['Lomo de cerdo (cocido)', 196, 27, 0, 9],
+  ['Atún al agua (lata)', 116, 26, 0, 1],
+  ['Salmón (cocido)', 206, 22, 0, 12],
+  ['Merluza (cocida)', 90, 19, 0, 1.3],
+  ['Huevo entero', 143, 12.6, 0.7, 9.5, 50],
+  ['Clara de huevo', 52, 10.9, 0.7, 0.2, 33],
+  ['Jamón cocido', 145, 21, 1.5, 6, 20],
+  ['Proteína whey (polvo)', 400, 80, 8, 6, 30],
+  // Lácteos
+  ['Leche entera', 61, 3.2, 4.8, 3.3],
+  ['Leche descremada', 34, 3.4, 5, 0.1],
+  ['Yogur natural', 61, 3.5, 4.7, 3.3],
+  ['Yogur griego descremado', 59, 10.2, 3.6, 0.4],
+  ['Queso mozzarella', 300, 22, 2.2, 22],
+  ['Queso cottage', 98, 11, 3.4, 4.3],
+  ['Queso untable light', 150, 10, 4, 10],
+  // Cereales y almidones
+  ['Arroz blanco (cocido)', 130, 2.7, 28, 0.3],
+  ['Arroz blanco (crudo)', 365, 7.1, 80, 0.7],
+  ['Arroz integral (cocido)', 123, 2.7, 25.6, 1],
+  ['Fideos / pasta (cocida)', 158, 5.8, 31, 0.9],
+  ['Fideos / pasta (cruda)', 371, 13, 75, 1.5],
+  ['Avena', 389, 16.9, 66, 6.9],
+  ['Pan blanco', 265, 9, 49, 3.2, 30],
+  ['Pan integral', 247, 13, 41, 3.4, 30],
+  ['Tortilla de trigo', 310, 8.3, 51, 8, 45],
+  ['Galleta de arroz', 387, 8, 81, 2.8, 9],
+  ['Granola', 471, 10, 64, 20],
+  ['Papa (hervida)', 87, 1.9, 20, 0.1],
+  ['Batata / boniato (hervida)', 76, 1.4, 17.7, 0.1],
+  ['Quinoa (cocida)', 120, 4.4, 21.3, 1.9],
+  // Legumbres
+  ['Lentejas (cocidas)', 116, 9, 20, 0.4],
+  ['Garbanzos (cocidos)', 164, 8.9, 27.4, 2.6],
+  ['Porotos / frijoles negros (cocidos)', 132, 8.9, 23.7, 0.5],
+  // Frutas
+  ['Banana / plátano', 89, 1.1, 22.8, 0.3, 120],
+  ['Manzana', 52, 0.3, 13.8, 0.2, 180],
+  ['Naranja', 47, 0.9, 11.8, 0.1, 150],
+  ['Frutillas / fresas', 32, 0.7, 7.7, 0.3],
+  ['Arándanos', 57, 0.7, 14.5, 0.3],
+  ['Palta / aguacate', 160, 2, 8.5, 14.7],
+  // Verduras
+  ['Brócoli', 34, 2.8, 6.6, 0.4],
+  ['Espinaca', 23, 2.9, 3.6, 0.4],
+  ['Lechuga', 15, 1.4, 2.9, 0.2],
+  ['Tomate', 18, 0.9, 3.9, 0.2, 120],
+  ['Zanahoria', 41, 0.9, 9.6, 0.2, 70],
+  ['Cebolla', 40, 1.1, 9.3, 0.1],
+  // Grasas y frutos secos
+  ['Aceite de oliva', 884, 0, 0, 100],
+  ['Manteca / mantequilla', 717, 0.9, 0.1, 81],
+  ['Mantequilla de maní', 588, 25, 20, 50],
+  ['Almendras', 579, 21, 21.6, 49.9],
+  ['Nueces', 654, 15.2, 13.7, 65.2],
+  ['Mayonesa', 680, 1, 0.6, 75],
+  // Dulces y bebidas
+  ['Miel', 304, 0.3, 82.4, 0],
+  ['Azúcar', 387, 0, 100, 0],
+  ['Dulce de leche', 315, 7, 55, 7.5],
+  ['Chocolate negro 70%', 598, 7.8, 45.9, 42.6],
+  ['Jugo de naranja', 45, 0.7, 10.4, 0.2],
+  ['Gaseosa / refresco', 42, 0, 10.6, 0],
+  ['Cerveza', 43, 0.5, 3.6, 0],
+  ['Pizza de muzzarella', 266, 11, 33, 10],
+].map(a => ({ id: 'b:' + a[0], n: a[0], k: a[1], p: a[2], c: a[3], f: a[4], u: a[5] || 0 }));
+
+/* Ejercicios: [nombre, tipo ('f' fuerza / 'c' cardio), MET] */
+const EXS = [
+  ['Press banca', 'f', 6], ['Press inclinado con mancuernas', 'f', 6], ['Press militar', 'f', 6],
+  ['Sentadilla', 'f', 6], ['Peso muerto', 'f', 6], ['Peso muerto rumano', 'f', 6],
+  ['Prensa de piernas', 'f', 5], ['Zancadas', 'f', 5], ['Hip thrust', 'f', 5],
+  ['Extensión de cuádriceps', 'f', 4], ['Curl femoral', 'f', 4], ['Gemelos', 'f', 4],
+  ['Remo con barra', 'f', 6], ['Remo con mancuerna', 'f', 5], ['Dominadas', 'f', 6],
+  ['Jalón al pecho', 'f', 5], ['Fondos', 'f', 6], ['Curl de bíceps', 'f', 4],
+  ['Curl martillo', 'f', 4], ['Tríceps en polea', 'f', 4], ['Press francés', 'f', 4],
+  ['Elevaciones laterales', 'f', 4], ['Aperturas / pec deck', 'f', 4], ['Face pull', 'f', 4],
+  ['Abdominales / crunch', 'f', 3.8], ['Plancha', 'f', 3.8],
+  ['Caminar', 'c', 3.5], ['Caminata rápida', 'c', 4.3], ['Correr (8 km/h)', 'c', 8.3],
+  ['Correr (10 km/h)', 'c', 9.8], ['Bicicleta (ritmo moderado)', 'c', 7], ['Bicicleta fija', 'c', 6.8],
+  ['Elíptica', 'c', 5], ['Remo (máquina)', 'c', 7], ['Saltar la soga', 'c', 11],
+  ['Natación', 'c', 6], ['HIIT', 'c', 8], ['Fútbol', 'c', 7],
+].map(a => ({ n: a[0], t: a[1], m: a[2] }));
