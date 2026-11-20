@@ -45,24 +45,48 @@ function getDay(k) { const d = S.days[k]; return { meals: d?.meals || [], work: 
 function dayW(k) { const d = (S.days[k] ||= {}); d.meals ||= []; d.work ||= []; return d; }
 
 const allFoods = () => S.foods.concat(FOODS);
-const foodById = id => allFoods().find(f => f.id === id);
+const foodById = id => { id = FOOD_ALIAS[id] || id; return allFoods().find(f => f.id === id); };
 const allExs = () => S.exs.concat(EXS);
 const exByName = n => allExs().find(e => norm(e.n) === norm(n));
 const macro = (f, g) => ({ k: f.k * g / 100, p: f.p * g / 100, c: f.c * g / 100, f: f.f * g / 100 });
 
+const POP = new Set(Object.values(FOOD_ALIAS)); // alimentos más comunes (los de la primera versión)
+// Sinónimos de otros países → nombre usado en la base (así "fresas" encuentra "Frutillas")
+const SYN = {
+  fresa: 'frutilla', fresas: 'frutilla', platano: 'banana', platanos: 'banana', frijol: 'poroto', frijoles: 'poroto',
+  judias: 'poroto', alubias: 'alubia', aguacate: 'palta', boniato: 'batata', camote: 'batata', patata: 'papa', patatas: 'papa',
+  elote: 'choclo', maiz: 'maiz', calabacin: 'zucchini', zapallito: 'zapallito', pina: 'anana', melocoton: 'durazno',
+  guisantes: 'arveja', chicharos: 'arveja', ejotes: 'chaucha', vainitas: 'chaucha', pimiento: 'morron', pimenton: 'pimenton',
+  jitomate: 'tomate', setas: 'hongo', champinon: 'champinon', tocino: 'panceta', bacon: 'panceta', beicon: 'panceta',
+  molida: 'picada', gambas: 'langostino', camaron: 'camaron', nata: 'crema', zumo: 'jugo', toronja: 'pomelo',
+  cacahuate: 'mani', cacahuete: 'mani', palomitas: 'pochoclo', refresco: 'gaseosa', soda: 'soda', galleta: 'galleta',
+  mantequilla: 'manteca', requeson: 'ricota', frutos: 'frutos',
+};
 function search(list, q, lim = 8) {
   const ws = norm(q).split(/\s+/).filter(Boolean);
   if (!ws.length) return [];
-  return list.filter(x => { const n = norm(x.n); return ws.every(w => n.includes(w)); })
-    .map(x => { const n = norm(x.n); return [ws.reduce((s, w) => s + n.indexOf(w), 0) + n.length / 100, x]; })
+  const hit = (n, w) => n.includes(w) || (SYN[w] && n.includes(SYN[w]));
+  // Puntaje (menor = mejor): palabra completa al principio > palabra suelta > dentro de otra palabra ("repollo")
+  const pos = (n, w) => {
+    for (const t of [w, SYN[w]]) {
+      if (!t) continue;
+      const m = n.match(new RegExp('(^|[^a-z0-9])' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      if (m) return m.index;
+      const i = n.indexOf(t); if (i >= 0) return 100 + i;
+    }
+    return 200;
+  };
+  const bonus = x => (String(x.id).startsWith('c:') ? 30 : 0) + (POP.has(x.id) ? 20 : 0); // tuyos y comunes primero
+  return list.filter(x => { const n = norm(x.n); return ws.every(w => hit(n, w)); })
+    .map(x => { const n = norm(x.n); return [ws.reduce((s, w) => s + pos(n, w), 0) + n.length / 100 - bonus(x), x]; })
     .sort((a, b) => a[0] - b[0]).slice(0, lim).map(a => a[1]);
 }
 const sortedDays = () => Object.keys(S.days).sort().reverse();
 function recentFoods() {
   const out = [], seen = new Set();
   for (const k of sortedDays()) for (const m of [...(S.days[k].meals || [])].reverse()) {
-    if (seen.has(m.fid)) continue; seen.add(m.fid);
-    const f = foodById(m.fid); if (f) out.push(f);
+    const f = foodById(m.fid);
+    if (!f || seen.has(f.id)) continue; seen.add(f.id); out.push(f);
     if (out.length >= 8) return out;
   }
   return out;
@@ -188,9 +212,9 @@ function foodSug() {
     const rec = recentFoods();
     return rec.length
       ? `<p class="lbl">Recientes</p><div class="chips">${rec.map(f => `<button class="chip" data-a="pickfood" data-id="${esc(f.id)}">${esc(f.n)}</button>`).join('')}</div>`
-      : `<p class="hint">Busca entre ${FOODS.length} alimentos o crea los tuyos con los datos de la etiqueta.</p>`;
+      : `<p class="hint">Busca entre ${FOODS.length} alimentos con valores oficiales del USDA, o crea los tuyos con los datos de la etiqueta.</p>`;
   }
-  const res = search(allFoods(), q);
+  const res = search(allFoods(), q, 15);
   return (res.length ? `<div class="list">${res.map(f => `<button class="item" data-a="pickfood" data-id="${esc(f.id)}">
       <span>${esc(f.n)}</span><small>${f.k} kcal · P ${f.p} g /100 g</small></button>`).join('')}</div>` : '<p class="hint">Sin resultados.</p>')
     + `<button class="link" data-a="newfood">+ Crear “${esc(q)}”</button>`;
@@ -204,7 +228,8 @@ function foodForm() {
   const f = ui.food && foodById(ui.food); if (!f) return '';
   return `<div class="sel">
     <div class="selh"><b>${esc(f.n)}</b><button class="x" data-a="cancelfood" aria-label="Cancelar">✕</button></div>
-    <small class="mute">Por 100 g: ${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f}${f.u ? ` · 1 unidad ≈ ${f.u} g` : ''}</small>
+    <small class="mute">Por 100 g: ${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f}${f.fb ? ` · Fibra ${f.fb}` : ''}${f.u ? ` · 1 unidad ≈ ${f.u} g` : ''}</small>
+    <small class="src">${f.fdc ? `Fuente: USDA FoodData Central · ficha nº ${f.fdc}` : 'Alimento propio (creado por ti)'}</small>
     <div class="grid2">
       <label>Gramos<input id="fg" type="number" inputmode="decimal" min="0" step="any" value="${esc(ui.grams)}"></label>
       <label>Comida<select id="fm">${MEALS.map(([k, l]) => `<option value="${k}"${k === ui.meal ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
