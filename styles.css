@@ -40,6 +40,9 @@ button, input, select { font: inherit; color: inherit; }
 .hint { color: var(--mute); font-size: 14px; margin: 6px 0; }
 .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--mute); margin: 10px 0 6px; }
 .o { color: var(--o); }
+.note { font-size: 14px; padding: 10px 12px; border-radius: 10px; background: var(--field); border-left: 3px solid var(--acc); margin: 8px 0 0; }
+.btn:disabled { opacity: .5; }
+[hidden] { display: none !important; }
 
 /* Hoy */
 .hero { display: flex; align-items: center; gap: 16px; }

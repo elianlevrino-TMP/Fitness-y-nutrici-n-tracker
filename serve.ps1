@@ -15,6 +15,7 @@ while ($l.IsListening) {
   if ($f.StartsWith($root) -and (Test-Path $f -PathType Leaf)) {
     $bytes = [IO.File]::ReadAllBytes($f)
     $ctx.Response.ContentType = $types[[IO.Path]::GetExtension($f)]
+    $ctx.Response.ContentLength64 = $bytes.Length
     $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
   } else { $ctx.Response.StatusCode = 404 }
   $ctx.Response.Close()

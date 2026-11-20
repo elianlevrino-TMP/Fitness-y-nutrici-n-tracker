@@ -39,6 +39,7 @@ function load() {
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('⚠️ No se pudo guardar'); }
+  Sync.schedule();
 }
 function getDay(k) { const d = S.days[k]; return { meals: d?.meals || [], work: d?.work || [], weight: d?.weight || 0 }; }
 function dayW(k) { const d = (S.days[k] ||= {}); d.meals ||= []; d.work ||= []; return d; }
@@ -369,6 +370,34 @@ function vProg() {
   </section>`;
 }
 
+/* ---------- Cuenta y sincronización ---------- */
+function syncTxt() {
+  const s = Sync.status();
+  return {
+    idle: 'Conectando…',
+    syncing: '⏳ Sincronizando…',
+    ok: `✅ Sincronizado${s.at ? ' a las ' + new Date(s.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) : ''}`,
+    offline: '📴 Sin conexión: se sincroniza al volver internet',
+    error: `⚠️ ${esc(s.msg)}`,
+  }[s.state];
+}
+function vCuenta() {
+  const s = Sync.status(), msg = ui.acMsg ? `<p class="note">${esc(ui.acMsg)}</p>` : '';
+  if (ui.recovery) return `<section class="card"><h3>Nueva contraseña</h3>
+    <label>Escribe tu nueva contraseña<input id="ac-np" type="password" autocomplete="new-password"></label>
+    <button class="btn pri wide" data-a="setpw">Guardar contraseña</button></section>`;
+  if (!s.logged) return `<section class="card"><h3>Cuenta <small class="mute">(opcional)</small></h3>
+    <p class="small mute">Con una cuenta tus datos se guardan en la nube y los ves en todos tus dispositivos. Sin cuenta, quedan solo en este teléfono.</p>
+    ${msg}
+    <label>Correo<input id="ac-e" type="email" inputmode="email" autocomplete="email"></label>
+    <label>Contraseña<input id="ac-p" type="password" autocomplete="current-password"></label>
+    <div class="grid2"><button class="btn pri" data-a="login">Entrar</button><button class="btn" data-a="signup">Crear cuenta</button></div>
+    <button class="link" data-a="forgot">¿Olvidaste tu contraseña?</button></section>`;
+  return `<section class="card"><div class="cardh"><h3>Cuenta</h3><button class="link" data-a="logout">Cerrar sesión</button></div>
+    ${msg}<p class="small"><b>${esc(s.email)}</b></p><p class="small" id="syncst">${syncTxt()}</p>
+    <button class="btn wide" data-a="syncnow">Sincronizar ahora</button></section>`;
+}
+
 /* ---------- Perfil ---------- */
 function vPerfil() {
   const p = S.profile || { sex: 'm', age: '', height: '', weight: '', act: 1.375, goal: 'maint', prot: 2 };
@@ -381,7 +410,7 @@ function vPerfil() {
       <div><span>Gasto sin entrenar</span><b>${fmt(t.base)}</b></div>
       <div><span>Comer (día descanso)</span><b>${fmt(t.base + GOALS[p.goal].adj)}</b></div></div>`;
   }
-  return `
+  return `${S.profile ? '' : vCuenta()}
   <section class="card">
     ${S.profile ? '<h3>Mis datos</h3>' : '<h2>¡Bienvenido! 👋</h2><p class="mute">Completa tus datos para calcular cuánto gastas y cuánto deberías comer cada día.</p>'}
     <div class="grid2">
@@ -397,16 +426,16 @@ function vPerfil() {
     <button class="btn pri wide" data-a="saveprof">${S.profile ? 'Guardar cambios' : 'Empezar'}</button>
     ${st}
   </section>
-  ${S.profile ? `
+  ${S.profile ? `${vCuenta()}
   <section class="card"><h3>Mis alimentos</h3>
     ${S.foods.length ? S.foods.map(f => `<div class="row"><div class="grow"><b>${esc(f.n)}</b><small>${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f} /100 g</small></div>
       <button class="x" data-a="delfood" data-id="${esc(f.id)}" aria-label="Borrar">✕</button></div>`).join('') : '<p class="hint">Los alimentos que crees aparecerán aquí.</p>'}
   </section>
   <section class="card"><h3>Copia de seguridad</h3>
-    <p class="small mute">Tus datos se guardan solo en este teléfono. Exporta una copia de vez en cuando.</p>
+    <p class="small mute">${Sync.status().logged ? 'Tus datos están en tu cuenta. También puedes exportar una copia en un archivo.' : 'Tus datos se guardan solo en este teléfono. Exporta una copia de vez en cuando.'}</p>
     <div class="grid2"><button class="btn" data-a="export">Exportar</button>
       <label class="btn">Importar<input id="imp" type="file" accept="application/json,.json" hidden></label></div>
-    <button class="btn danger wide" data-a="reset">Borrar todos los datos</button>
+    <button class="btn danger wide" data-a="reset">${Sync.status().logged ? 'Borrar datos de este teléfono y cerrar sesión' : 'Borrar todos los datos'}</button>
   </section>` : ''}`;
 }
 
@@ -532,11 +561,56 @@ const ACT = {
     a.href = URL.createObjectURL(new Blob([JSON.stringify(S)], { type: 'application/json' }));
     a.download = `fitlog-${today()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
-  reset: () => {
-    if (!confirm('Se borrarán TODOS tus datos de este teléfono. ¿Seguro?')) return;
+  reset: async () => {
+    const logged = Sync.status().logged;
+    if (!confirm(logged ? 'Se borrarán los datos de este teléfono y se cerrará la sesión. Lo que ya está en tu cuenta se mantiene. ¿Seguro?'
+      : 'Se borrarán TODOS tus datos de este teléfono. ¿Seguro?')) return;
+    if (logged) await Sync.signOut();
     S = DEF(); save(); ui.tab = 'perfil'; render();
   },
+
+  // Cuenta
+  login: async el => {
+    const e = $('#ac-e').value.trim(), p = $('#ac-p').value;
+    if (!e || !p) return toast('Escribe tu correo y contraseña');
+    el.disabled = true;
+    try { await Sync.signIn(e, p); ui.acMsg = ''; toast('Sesión iniciada'); afterSync(); }
+    catch (err) { toast(err instanceof TypeError ? 'Sin conexión' : err.message); el.disabled = false; }
+  },
+  signup: async el => {
+    const e = $('#ac-e').value.trim(), p = $('#ac-p').value;
+    if (!e) return toast('Escribe tu correo');
+    if (p.length < 8) return toast('La contraseña debe tener al menos 8 caracteres');
+    el.disabled = true;
+    try {
+      const r = await Sync.signUp(e, p);
+      ui.acMsg = r === 'confirm' ? `Te enviamos un correo a ${e}. Ábrelo y toca el enlace para activar tu cuenta.` : '';
+      if (r === 'in') toast('Cuenta creada');
+      afterSync();
+    } catch (err) { toast(err instanceof TypeError ? 'Sin conexión' : err.message); el.disabled = false; }
+  },
+  forgot: async () => {
+    const e = $('#ac-e').value.trim();
+    if (!e) return toast('Escribe tu correo arriba');
+    try { await Sync.recover(e); ui.acMsg = `Si ${e} tiene cuenta, te llegará un correo para cambiar la contraseña.`; render(); }
+    catch (err) { toast(err instanceof TypeError ? 'Sin conexión' : err.message); }
+  },
+  setpw: async () => {
+    const p = $('#ac-np').value;
+    if (p.length < 8) return toast('Al menos 8 caracteres');
+    try { await Sync.updatePassword(p); ui.recovery = false; toast('Contraseña cambiada'); render(); }
+    catch (err) { toast(err.message); }
+  },
+  logout: async () => {
+    if (!confirm('¿Cerrar sesión en este dispositivo?')) return;
+    if (Sync.pending() && !navigator.onLine && !confirm('Hay cambios sin subir y no hay internet: se perderán de la nube. ¿Cerrar igual?')) return;
+    await Sync.signOut();
+    if (confirm('Tus datos siguen guardados en tu cuenta. ¿Borrarlos también de este teléfono?')) { S = DEF(); save(); }
+    ui.acMsg = ''; render();
+  },
+  syncnow: () => Sync.sync(),
 };
+function afterSync() { if (S.profile && ui.tab === 'perfil' && !ui.hadProfile) ui.tab = 'hoy'; ui.hadProfile = !!S.profile; render(); }
 
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-a]');
@@ -577,11 +651,22 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const id = e.target.id;
   if (id === 'fg') ACT.addfood();
+  else if (id === 'ac-p') ACT.login($('[data-a="login"]'));
   else if (id === 'fq') { const b = $('#fsug [data-a="pickfood"]'); if (b) b.click(); }
   else if (id === 'eq') { const b = $('#esug [data-a="pickex"], #esug [data-a="newex"]'); if (b) b.click(); }
 });
 
 /* ================= Inicio ================= */
+ui.hadProfile = !!S.profile;
+Sync.onChange = afterSync;
+Sync.onStatus = () => { const el = $('#syncst'); if (el) el.innerHTML = syncTxt(); };
 render();
+Sync.init().then(r => {
+  if (!r) return;
+  if (r.error) return toast('⚠️ ' + r.error);
+  if (r.type === 'recovery') { ui.recovery = true; ui.tab = 'perfil'; }
+  if (r.type === 'signup') { ui.acMsg = ''; toast('¡Cuenta confirmada!'); }
+  afterSync();
+});
 navigator.storage?.persist?.();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js');

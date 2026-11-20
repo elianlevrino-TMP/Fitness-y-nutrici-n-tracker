@@ -1,6 +1,6 @@
 // Service worker: la app funciona sin internet y solo descarga cambios cuando los hay.
-const CACHE = 'fitlog-v1';
-const FILES = ['./', 'index.html', 'styles.css', 'data.js', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'fitlog-v2';
+const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'data.js', 'sync.js', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

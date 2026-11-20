@@ -28,5 +28,16 @@ Cualquier hosting estático sirve (necesita HTTPS para instalarse):
 Luego en el celular: abre la URL → menú del navegador → **"Añadir a pantalla de inicio"**.
 
 ## Datos
-Se guardan en el navegador del teléfono (localStorage). Usa **Perfil → Exportar** de vez en cuando
-para tener una copia de seguridad; **Importar** la restaura (o la pasa a otro teléfono).
+Se guardan primero en el navegador del teléfono (localStorage), así la app funciona sin internet.
+**Perfil → Exportar** crea una copia en un archivo; **Importar** la restaura.
+
+### Cuenta y nube (Supabase, opcional)
+Si inicias sesión en **Perfil → Cuenta**, `sync.js` copia tus datos a Supabase y los trae en tus otros
+dispositivos. Solo sube los días que cambiaron. No usa librerías externas, solo `fetch`.
+
+- `config.js`: URL del proyecto y **publishable key**. Ambas son públicas por diseño.
+  **Nunca** pongas ahí la secret key ni la service_role key.
+- `supabase/schema.sql`: tablas `days` y `settings`, más las reglas de seguridad (RLS) que hacen que
+  cada usuario solo pueda ver y cambiar sus propias filas. Se ejecuta una vez en el SQL Editor de Supabase.
+- En Supabase → **Authentication → URL Configuration**: *Site URL* = la dirección de Vercel, y en
+  *Redirect URLs* añade esa misma dirección y `http://localhost:8080/` (para los correos de confirmación).
