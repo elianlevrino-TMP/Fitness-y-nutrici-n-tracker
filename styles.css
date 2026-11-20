@@ -44,6 +44,18 @@ button, input, select { font: inherit; color: inherit; }
 .btn:disabled { opacity: .5; }
 [hidden] { display: none !important; }
 
+/* Pantalla de inicio de sesión */
+body.gate { padding-bottom: 24px; }
+body.gate #nav, body.gate #top { display: none; }
+.auth { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; padding: 32px 0; text-align: center; }
+.auth .logo { display: block; margin: 0 auto 10px; border-radius: 18px; }
+.auth h1 { font-size: 28px; margin: 0; }
+.auth > p { margin: 4px 0 20px; }
+.auth .card { text-align: left; }
+.auth .card .link { display: block; margin: 10px auto 0; }
+.swap { color: var(--mute); font-size: 14px; }
+.swap .link { padding: 0; }
+
 /* Hoy */
 .hero { display: flex; align-items: center; gap: 16px; }
 .ring { width: 130px; flex: none; }

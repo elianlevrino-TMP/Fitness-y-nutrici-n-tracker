@@ -381,20 +381,32 @@ function syncTxt() {
     error: `⚠️ ${esc(s.msg)}`,
   }[s.state];
 }
+// Pantalla de entrada: lo primero que se ve si no hay sesión iniciada
+function vLogin() {
+  const up = ui.authMode === 'up', msg = ui.acMsg ? `<p class="note">${esc(ui.acMsg)}</p>` : '';
+  return `<div class="auth">
+    <img src="icon.svg" alt="" class="logo" width="72" height="72">
+    <h1>FitLog</h1>
+    <p class="mute">Tu entrenamiento y tu alimentación, en un solo lugar.</p>
+    <section class="card">
+      <h3>${up ? 'Crear cuenta' : 'Iniciar sesión'}</h3>
+      ${msg}
+      <label>Correo<input id="ac-e" type="email" inputmode="email" autocomplete="email" value="${esc(ui.acEmail || '')}"></label>
+      <label>Contraseña${up ? ' <small class="mute">(mínimo 8 caracteres)</small>' : ''}<input id="ac-p" type="password" autocomplete="${up ? 'new-password' : 'current-password'}"></label>
+      <button class="btn pri wide" data-a="${up ? 'signup' : 'login'}">${up ? 'Crear cuenta' : 'Entrar'}</button>
+      ${up ? '' : '<button class="link" data-a="forgot">¿Olvidaste tu contraseña?</button>'}
+    </section>
+    <p class="swap">${up ? '¿Ya tienes cuenta?' : '¿No tienes cuenta?'} <button class="link" data-a="authmode">${up ? 'Entrar' : 'Crear una'}</button></p>
+  </div>`;
+}
+// Tarjeta de cuenta dentro de Perfil (con sesión iniciada)
 function vCuenta() {
-  const s = Sync.status(), msg = ui.acMsg ? `<p class="note">${esc(ui.acMsg)}</p>` : '';
+  const s = Sync.status();
   if (ui.recovery) return `<section class="card"><h3>Nueva contraseña</h3>
     <label>Escribe tu nueva contraseña<input id="ac-np" type="password" autocomplete="new-password"></label>
     <button class="btn pri wide" data-a="setpw">Guardar contraseña</button></section>`;
-  if (!s.logged) return `<section class="card"><h3>Cuenta <small class="mute">(opcional)</small></h3>
-    <p class="small mute">Con una cuenta tus datos se guardan en la nube y los ves en todos tus dispositivos. Sin cuenta, quedan solo en este teléfono.</p>
-    ${msg}
-    <label>Correo<input id="ac-e" type="email" inputmode="email" autocomplete="email"></label>
-    <label>Contraseña<input id="ac-p" type="password" autocomplete="current-password"></label>
-    <div class="grid2"><button class="btn pri" data-a="login">Entrar</button><button class="btn" data-a="signup">Crear cuenta</button></div>
-    <button class="link" data-a="forgot">¿Olvidaste tu contraseña?</button></section>`;
-  return `<section class="card"><div class="cardh"><h3>Cuenta</h3><button class="link" data-a="logout">Cerrar sesión</button></div>
-    ${msg}<p class="small"><b>${esc(s.email)}</b></p><p class="small" id="syncst">${syncTxt()}</p>
+  return `<section class="card"><div class="cardh"><h3>Mi cuenta</h3><button class="link" data-a="logout">Cerrar sesión</button></div>
+    <p class="small"><b>${esc(s.email)}</b></p><p class="small" id="syncst">${syncTxt()}</p>
     <button class="btn wide" data-a="syncnow">Sincronizar ahora</button></section>`;
 }
 
@@ -410,9 +422,10 @@ function vPerfil() {
       <div><span>Gasto sin entrenar</span><b>${fmt(t.base)}</b></div>
       <div><span>Comer (día descanso)</span><b>${fmt(t.base + GOALS[p.goal].adj)}</b></div></div>`;
   }
-  return `${S.profile ? '' : vCuenta()}
+  return `${S.profile || ui.recovery ? vCuenta() : ''}
   <section class="card">
-    ${S.profile ? '<h3>Mis datos</h3>' : '<h2>¡Bienvenido! 👋</h2><p class="mute">Completa tus datos para calcular cuánto gastas y cuánto deberías comer cada día.</p>'}
+    ${S.profile ? '<h3>Mis datos</h3>' : `<h2>¡Bienvenido! 👋</h2><p class="mute">Completa tus datos para calcular cuánto gastas y cuánto deberías comer cada día.</p>
+      <p class="small mute">Sesión: ${esc(Sync.status().email)} · <button class="link" data-a="logout">Salir</button></p>`}
     <div class="grid2">
       <label>Sexo<select id="pf-sex">${opt('m', p.sex, 'Hombre')}${opt('f', p.sex, 'Mujer')}</select></label>
       <label>Edad<input id="pf-age" type="number" inputmode="numeric" min="10" max="100" value="${p.age}"></label>
@@ -426,16 +439,15 @@ function vPerfil() {
     <button class="btn pri wide" data-a="saveprof">${S.profile ? 'Guardar cambios' : 'Empezar'}</button>
     ${st}
   </section>
-  ${S.profile ? `${vCuenta()}
+  ${S.profile ? `
   <section class="card"><h3>Mis alimentos</h3>
     ${S.foods.length ? S.foods.map(f => `<div class="row"><div class="grow"><b>${esc(f.n)}</b><small>${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f} /100 g</small></div>
       <button class="x" data-a="delfood" data-id="${esc(f.id)}" aria-label="Borrar">✕</button></div>`).join('') : '<p class="hint">Los alimentos que crees aparecerán aquí.</p>'}
   </section>
   <section class="card"><h3>Copia de seguridad</h3>
-    <p class="small mute">${Sync.status().logged ? 'Tus datos están en tu cuenta. También puedes exportar una copia en un archivo.' : 'Tus datos se guardan solo en este teléfono. Exporta una copia de vez en cuando.'}</p>
+    <p class="small mute">Tus datos ya están guardados en tu cuenta. Si quieres, también puedes descargar una copia en un archivo.</p>
     <div class="grid2"><button class="btn" data-a="export">Exportar</button>
       <label class="btn">Importar<input id="imp" type="file" accept="application/json,.json" hidden></label></div>
-    <button class="btn danger wide" data-a="reset">${Sync.status().logged ? 'Borrar datos de este teléfono y cerrar sesión' : 'Borrar todos los datos'}</button>
   </section>` : ''}`;
 }
 
@@ -450,6 +462,9 @@ function renderTop() {
     : `<h1>${ui.tab === 'progreso' ? 'Progreso' : 'Perfil'}</h1>`;
 }
 function render() {
+  const gate = !Sync.status().logged; // sin sesión → solo la pantalla de entrada
+  document.body.classList.toggle('gate', gate);
+  if (gate) { $('#top').innerHTML = ''; $('#view').innerHTML = vLogin(); return; }
   if (!S.profile) ui.tab = 'perfil';
   renderTop();
   $('#view').innerHTML = VIEWS[ui.tab]();
@@ -561,21 +576,14 @@ const ACT = {
     a.href = URL.createObjectURL(new Blob([JSON.stringify(S)], { type: 'application/json' }));
     a.download = `fitlog-${today()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
-  reset: async () => {
-    const logged = Sync.status().logged;
-    if (!confirm(logged ? 'Se borrarán los datos de este teléfono y se cerrará la sesión. Lo que ya está en tu cuenta se mantiene. ¿Seguro?'
-      : 'Se borrarán TODOS tus datos de este teléfono. ¿Seguro?')) return;
-    if (logged) await Sync.signOut();
-    S = DEF(); save(); ui.tab = 'perfil'; render();
-  },
-
   // Cuenta
+  authmode: () => { ui.acEmail = $('#ac-e').value.trim(); ui.authMode = ui.authMode === 'up' ? 'in' : 'up'; ui.acMsg = ''; render(); },
   login: async el => {
     const e = $('#ac-e').value.trim(), p = $('#ac-p').value;
     if (!e || !p) return toast('Escribe tu correo y contraseña');
-    el.disabled = true;
-    try { await Sync.signIn(e, p); ui.acMsg = ''; toast('Sesión iniciada'); afterSync(); }
-    catch (err) { toast(err instanceof TypeError ? 'Sin conexión' : err.message); el.disabled = false; }
+    el.disabled = true; el.textContent = 'Entrando…';
+    try { await Sync.signIn(e, p); enterApp(); }
+    catch (err) { toast(err instanceof TypeError ? 'Sin conexión: la primera vez necesitas internet' : err.message); el.disabled = false; el.textContent = 'Entrar'; }
   },
   signup: async el => {
     const e = $('#ac-e').value.trim(), p = $('#ac-p').value;
@@ -584,9 +592,10 @@ const ACT = {
     el.disabled = true;
     try {
       const r = await Sync.signUp(e, p);
-      ui.acMsg = r === 'confirm' ? `Te enviamos un correo a ${e}. Ábrelo y toca el enlace para activar tu cuenta.` : '';
-      if (r === 'in') toast('Cuenta creada');
-      afterSync();
+      if (r === 'in') return enterApp();
+      ui.authMode = 'in'; ui.acEmail = e;
+      ui.acMsg = `Te enviamos un correo a ${e}. Ábrelo, toca el enlace para activar tu cuenta y después entra aquí.`;
+      render();
     } catch (err) { toast(err instanceof TypeError ? 'Sin conexión' : err.message); el.disabled = false; }
   },
   forgot: async () => {
@@ -602,14 +611,20 @@ const ACT = {
     catch (err) { toast(err.message); }
   },
   logout: async () => {
-    if (!confirm('¿Cerrar sesión en este dispositivo?')) return;
-    if (Sync.pending() && !navigator.onLine && !confirm('Hay cambios sin subir y no hay internet: se perderán de la nube. ¿Cerrar igual?')) return;
+    if (Sync.pending() && !navigator.onLine) {
+      if (!confirm('Hay cambios que todavía no se subieron y no hay internet: si cierras sesión ahora se perderán. ¿Cerrar igual?')) return;
+    } else if (!confirm('¿Cerrar sesión? Tus datos quedan guardados en tu cuenta.')) return;
     await Sync.signOut();
-    if (confirm('Tus datos siguen guardados en tu cuenta. ¿Borrarlos también de este teléfono?')) { S = DEF(); save(); }
-    ui.acMsg = ''; render();
+    S = DEF(); save(); // los datos quedan en la nube; este dispositivo queda limpio
+    Object.assign(ui, { tab: 'hoy', authMode: 'in', acMsg: '', recovery: false, hadProfile: false });
+    render(); scrollTo(0, 0);
   },
   syncnow: () => Sync.sync(),
 };
+function enterApp() {
+  ui.acMsg = ''; ui.tab = S.profile ? 'hoy' : 'perfil'; ui.hadProfile = !!S.profile;
+  render(); scrollTo(0, 0); toast('¡Hola de nuevo!');
+}
 function afterSync() { if (S.profile && ui.tab === 'perfil' && !ui.hadProfile) ui.tab = 'hoy'; ui.hadProfile = !!S.profile; render(); }
 
 document.addEventListener('click', e => {
@@ -640,7 +655,7 @@ document.addEventListener('change', e => {
         const d = JSON.parse(r.result);
         if (!d || typeof d.days !== 'object') throw 0;
         if (!confirm('Esto reemplazará tus datos actuales por los del archivo. ¿Continuar?')) return;
-        S = Object.assign(DEF(), d); save(); toast('Datos importados'); ui.tab = S.profile ? 'hoy' : 'perfil'; render();
+        S = Object.assign(DEF(), d, { owner: S.owner }); save(); toast('Datos importados'); ui.tab = S.profile ? 'hoy' : 'perfil'; render();
       } catch (err) { toast('Archivo no válido'); }
     };
     r.readAsText(t.files[0]);
@@ -651,7 +666,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const id = e.target.id;
   if (id === 'fg') ACT.addfood();
-  else if (id === 'ac-p') ACT.login($('[data-a="login"]'));
+  else if (id === 'ac-p') { const b = $('[data-a="login"], [data-a="signup"]'); ACT[b.dataset.a](b); }
   else if (id === 'fq') { const b = $('#fsug [data-a="pickfood"]'); if (b) b.click(); }
   else if (id === 'eq') { const b = $('#esug [data-a="pickex"], #esug [data-a="newex"]'); if (b) b.click(); }
 });
@@ -659,6 +674,13 @@ document.addEventListener('keydown', e => {
 /* ================= Inicio ================= */
 ui.hadProfile = !!S.profile;
 Sync.onChange = afterSync;
+// Si en este dispositivo había datos de OTRA cuenta, se borran antes de sincronizar (privacidad)
+Sync.onLogin = uid => {
+  if (S.owner && S.owner !== uid) S = DEF();
+  S.owner = uid;
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* sin espacio */ }
+};
+{ const s0 = Sync.status(); if (s0.logged && !S.owner) Sync.onLogin(s0.uid); } // sesiones abiertas antes de esta versión
 Sync.onStatus = () => { const el = $('#syncst'); if (el) el.innerHTML = syncTxt(); };
 render();
 Sync.init().then(r => {

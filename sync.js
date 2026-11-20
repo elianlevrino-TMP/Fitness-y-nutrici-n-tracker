@@ -13,7 +13,7 @@ const Sync = (() => {
   let meta = read(MKEY) || emptyMeta(); // qué versión de cada día está ya en la nube
   let timer = null, busy = false, again = false, refreshing = null;
   const st = { state: 'idle', msg: '', at: 0 };
-  const api = { onChange: () => {}, onStatus: () => {} };
+  const api = { onChange: () => {}, onStatus: () => {}, onLogin: () => {} };
 
   function read(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
   function write(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin espacio */ } }
@@ -67,6 +67,7 @@ const Sync = (() => {
     };
     write(AKEY, auth);
     if (meta.uid !== auth.user.id) { meta = emptyMeta(); meta.uid = auth.user.id; write(MKEY, meta); }
+    api.onLogin(auth.user.id);
   }
   function signOutLocal() { auth = null; meta = emptyMeta(); write(AKEY, null); write(MKEY, null); setStatus('idle'); }
 
@@ -162,7 +163,7 @@ const Sync = (() => {
 
   /* ---------- API pública ---------- */
   Object.assign(api, {
-    status: () => ({ logged: !!auth, email: auth?.user?.email || '', ...st }),
+    status: () => ({ logged: !!auth, email: auth?.user?.email || '', uid: auth?.user?.id || '', ...st }),
     schedule, sync,
     async signIn(email, password) {
       setSession(await authCall('token?grant_type=password', { email, password }));
