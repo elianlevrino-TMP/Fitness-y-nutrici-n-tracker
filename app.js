@@ -189,6 +189,7 @@ function vHoy() {
     <h3>Macros</h3>
     ${bar('Proteína', t.p, t.tP, 'p')}${bar('Carbohidratos', t.c, t.tC, 'c')}${bar('Grasas', t.f, t.tF, 'f')}
   </section>
+  ${mealsCard('Comidas')}
   <section class="card">
     <div class="cardh"><h3>Entrenamiento</h3><button class="link" data-a="tab" data-t="entreno">${d.work.length ? 'Ver' : 'Registrar'}</button></div>
     ${d.work.length
@@ -255,28 +256,73 @@ function newFoodForm() {
     <button class="btn pri wide" data-a="savefood">Guardar alimento</button>
   </div>`;
 }
-function mealList() {
+const mealName = k => (MEALS.find(x => x[0] === k) || MEALS[0])[1];
+const mealSum = it => it.reduce((t, m) => ({ k: t.k + m.k, p: t.p + m.p, c: t.c + m.c, f: t.f + m.f }), { k: 0, p: 0, c: 0, f: 0 });
+// Macros de un ítem ya registrado con otros gramos (si el alimento ya no existe, proporcional)
+function rescale(m, g) {
+  const f = foodById(m.fid);
+  if (f) return macro(f, g);
+  const x = m.g > 0 ? g / m.g : 0;
+  return { k: m.k * x, p: m.p * x, c: m.c * x, f: m.f * x };
+}
+// Listado del día: una fila por comida; al tocarla se abre con todo lo que tiene
+function mealsCard(title) {
   const d = getDay(ui.date);
-  if (!d.meals.length) {
-    const prev = getDay(addDays(ui.date, -1)).meals.length;
-    return `<section class="card"><p class="hint">Aún no hay comidas este día.</p>${prev ? '<button class="btn wide" data-a="copyprev">Copiar comidas del día anterior</button>' : ''}</section>`;
-  }
-  const t = totals(ui.date);
-  return MEALS.map(([k, l]) => {
-    const it = d.meals.filter(m => m.meal === k); if (!it.length) return '';
-    return `<section class="card"><div class="cardh"><h3>${l}</h3><span class="mute">${fmt(it.reduce((a, m) => a + m.k, 0))} kcal</span></div>
-      ${it.map(m => `<div class="row"><div class="grow"><b>${esc(m.n)}</b><small>${r0(m.g)} g · P ${r0(m.p)} · C ${r0(m.c)} · G ${r0(m.f)}</small></div>
-        <span class="kc">${fmt(m.k)}</span><button class="x" data-a="delmeal" data-id="${m.id}" aria-label="Borrar">✕</button></div>`).join('')}
-    </section>`;
-  }).join('') + `<section class="card tot"><span>Total del día</span><b>${fmt(t.k)} kcal</b><small>P ${r0(t.p)} · C ${r0(t.c)} · G ${r0(t.f)}</small></section>`;
+  return `<section class="card"><div class="cardh"><h3>${title}</h3>${d.meals.length ? `<span class="mute">${fmt(mealSum(d.meals).k)} kcal</span>` : ''}</div>
+    ${MEALS.map(([k, l]) => {
+      const it = d.meals.filter(m => m.meal === k);
+      return `<button class="mrow" data-a="openmeal" data-m="${k}">
+        <div class="grow"><b>${l}</b><small>${it.length ? esc(it.map(m => m.n).join(', ')) : 'Sin registrar'}</small></div>
+        <span class="kc">${it.length ? fmt(mealSum(it).k) : ''}</span><span class="chev">${it.length ? '›' : '+'}</span></button>`;
+    }).join('')}
+  </section>`;
 }
 function vComida() {
+  if (ui.mealOpen) return vMeal();
+  const d = getDay(ui.date), t = mealSum(d.meals);
+  const prev = !d.meals.length && getDay(addDays(ui.date, -1)).meals.length;
+  return mealsCard('Comidas del día')
+    + (d.meals.length ? `<section class="card tot"><span>Total del día</span><b>${fmt(t.k)} kcal</b><small>P ${r0(t.p)} g · C ${r0(t.c)} g · G ${r0(t.f)} g</small></section>` : '')
+    + (prev ? '<section class="card"><p class="hint">Aún no hay comidas este día.</p><button class="btn wide" data-a="copyprev">Copiar comidas del día anterior</button></section>' : '');
+}
+function editPrev() {
+  const m = getDay(ui.date).meals.find(x => x.id === ui.editMeal); if (!m) return '';
+  const x = rescale(m, num(ui.eGrams));
+  return `<div class="prev"><b>${fmt(x.k)} kcal</b><span class="p">P ${r1(x.p)}</span><span class="c">C ${r1(x.c)}</span><span class="f">G ${r1(x.f)}</span></div>`;
+}
+function mealEdit(m) {
+  const f = foodById(m.fid);
+  return `<div class="sel">
+    <div class="selh"><b>${esc(m.n)}</b><button class="x" data-a="canceledit" aria-label="Cancelar">✕</button></div>
+    ${f?.fdc ? `<small class="src">Fuente: USDA FoodData Central · ficha nº ${f.fdc}</small>` : ''}
+    <div class="grid2">
+      <label>Gramos<input id="eg" type="number" inputmode="decimal" min="0" step="any" value="${esc(ui.eGrams)}"></label>
+      <label>Comida<select id="em">${MEALS.map(([k, l]) => `<option value="${k}"${k === m.meal ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+    </div>
+    <div class="chips">${f?.u ? [1, 2, 3].map(n => `<button class="chip" data-a="egrams" data-g="${n * f.u}">${n} u</button>`).join('') : ''}${[50, 100, 150, 200].map(g => `<button class="chip" data-a="egrams" data-g="${g}">${g} g</button>`).join('')}</div>
+    <div id="eprevm">${editPrev()}</div>
+    <div class="grid2"><button class="btn danger" data-a="delmeal" data-id="${m.id}">Borrar</button><button class="btn pri" data-a="saveedit">Guardar</button></div>
+  </div>`;
+}
+// Una comida abierta: sus alimentos (tocar uno para cambiarlo) y el buscador para sumar más
+function vMeal() {
+  const k = ui.mealOpen, l = mealName(k);
+  const it = getDay(ui.date).meals.filter(m => m.meal === k), s = mealSum(it);
   return `<section class="card">
-    <h3>Añadir alimento</h3>
+    <button class="link" data-a="closemeal">‹ Comidas del día</button>
+    <div class="cardh"><h2>${l}</h2><b>${fmt(s.k)} kcal</b></div>
+    <p class="small mute">Proteína ${r0(s.p)} g · Carbohidratos ${r0(s.c)} g · Grasas ${r0(s.f)} g</p>
+    ${it.length ? it.map(m => ui.editMeal === m.id ? mealEdit(m) : `<button class="mrow" data-a="editmeal" data-id="${m.id}">
+        <div class="grow"><b>${esc(m.n)}</b><small>${r0(m.g)} g · P ${r0(m.p)} · C ${r0(m.c)} · G ${r0(m.f)}</small></div>
+        <span class="kc">${fmt(m.k)}</span><span class="chev">✎</span></button>`).join('')
+      : '<p class="hint">Todavía no agregaste nada a esta comida.</p>'}
+  </section>
+  <section class="card">
+    <h3>Añadir a ${l}</h3>
     ${ui.food || ui.newFood ? '' : `<input id="fq" class="search" type="search" placeholder="Buscar: pollo, arroz, huevo…" value="${esc(ui.foodQ)}" autocomplete="off">`}
     <div id="fsug">${foodSug()}</div>
     ${foodForm()}${newFoodForm()}
-  </section>${mealList()}`;
+  </section>`;
 }
 
 /* ---------- Entreno ---------- */
@@ -501,8 +547,30 @@ const focus = (id, sel) => { const el = $(id); if (el) { el.focus(); if (sel) el
 
 /* ================= Acciones ================= */
 const ACT = {
-  tab: el => { ui.tab = el.dataset.t; render(); scrollTo(0, 0); },
-  day: el => { ui.date = addDays(ui.date, +el.dataset.n); ui.editId = null; ui.exSel = null; render(); },
+  tab: el => { ui.tab = el.dataset.t; ui.mealOpen = null; ui.editMeal = null; render(); scrollTo(0, 0); },
+  day: el => { ui.date = addDays(ui.date, +el.dataset.n); ui.editId = null; ui.exSel = null; ui.editMeal = null; render(); },
+
+  // Comidas: abrir una, editar sus alimentos
+  openmeal: el => {
+    Object.assign(ui, { tab: 'comida', mealOpen: el.dataset.m, meal: el.dataset.m, food: null, newFood: false, foodQ: '', editMeal: null });
+    render(); scrollTo(0, 0);
+  },
+  closemeal: () => { Object.assign(ui, { mealOpen: null, editMeal: null, food: null, newFood: false }); render(); scrollTo(0, 0); },
+  editmeal: el => {
+    const m = getDay(ui.date).meals.find(x => x.id === el.dataset.id); if (!m) return;
+    ui.editMeal = m.id; ui.eGrams = String(m.g); ui.food = null; render(); focus('#eg', true);
+  },
+  canceledit: () => { ui.editMeal = null; render(); },
+  egrams: el => { ui.eGrams = el.dataset.g; $('#eg').value = ui.eGrams; $('#eprevm').innerHTML = editPrev(); },
+  saveedit: () => {
+    const m = dayW(ui.date).meals.find(x => x.id === ui.editMeal), g = num(ui.eGrams);
+    if (!m) return;
+    if (g <= 0) return toast('Indica los gramos');
+    const x = rescale(m, g), to = $('#em').value, moved = to !== m.meal;
+    Object.assign(m, { g, meal: to, k: r1(x.k), p: r1(x.p), c: r1(x.c), f: r1(x.f) });
+    save(); ui.editMeal = null;
+    toast(moved ? `✓ Movido a ${mealName(to)}` : `✓ ${m.n} · ${fmt(m.k)} kcal`); render();
+  },
   pick: () => { const i = $('#dpick'); try { i.showPicker(); } catch (e) { i.click(); } },
 
   pickfood: el => {
@@ -529,7 +597,10 @@ const ACT = {
     S.foods.unshift(food); save(); ui.newFood = false;
     ACT.pickfood({ dataset: { id: food.id } });
   },
-  delmeal: el => { const d = dayW(ui.date); d.meals = d.meals.filter(m => m.id !== el.dataset.id); save(); render(); },
+  delmeal: el => {
+    const d = dayW(ui.date), m = d.meals.find(x => x.id === el.dataset.id); if (!m) return;
+    d.meals = d.meals.filter(x => x.id !== m.id); ui.editMeal = null; save(); toast(`Borrado: ${m.n}`); render();
+  },
   copyprev: () => {
     const prev = getDay(addDays(ui.date, -1)).meals;
     dayW(ui.date).meals.push(...prev.map(m => ({ ...m, id: uid() }))); save(); toast('Comidas copiadas'); render();
@@ -660,6 +731,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'fq') { ui.foodQ = t.value; $('#fsug').innerHTML = foodSug(); }
   else if (t.id === 'fg') { ui.grams = t.value; $('#fprev').innerHTML = foodPrev(); }
+  else if (t.id === 'eg') { ui.eGrams = t.value; $('#eprevm').innerHTML = editPrev(); }
   else if (t.id === 'eq') { ui.exQ = t.value; $('#esug').innerHTML = exSug(); }
   else if (t.id === 'emin') { ui.minutes = t.value; $('#eprev').innerHTML = exPrev(); }
   else if (t.dataset.set !== undefined) { ui.sets[+t.dataset.set][t.dataset.k] = t.value; $('#eprev').innerHTML = exPrev(); }
@@ -691,6 +763,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const id = e.target.id;
   if (id === 'fg') ACT.addfood();
+  else if (id === 'eg') ACT.saveedit();
   else if (id === 'ac-p') { const b = $('[data-a="login"], [data-a="signup"]'); ACT[b.dataset.a](b); }
   else if (id === 'fq') { const b = $('#fsug [data-a="pickfood"]'); if (b) b.click(); }
   else if (id === 'eq') { const b = $('#esug [data-a="pickex"], #esug [data-a="newex"]'); if (b) b.click(); }

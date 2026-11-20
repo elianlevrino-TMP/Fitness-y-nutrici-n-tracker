@@ -120,6 +120,12 @@ input:focus, select:focus { outline: none; border-color: var(--acc); }
 .prev .p { color: var(--p); } .prev .c { color: var(--c); } .prev .f { color: var(--f); }
 .last { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--field); }
 
+.mrow { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: transparent; padding: 11px 4px; cursor: pointer; color: inherit; font: inherit; }
+.cardh + .mrow, .card > .mrow:first-of-type { border-top: 0; }
+.mrow:active { background: var(--field); }
+.mrow .grow small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chev { flex: none; width: 20px; text-align: center; color: var(--mute); font-size: 18px; }
+.cardh h2 { margin: 0; }
 .row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
 .cardh + .row { border-top: 0; }
 .grow { flex: 1; min-width: 0; }
