@@ -20,7 +20,7 @@ const dayLabel = k => {
 };
 
 /* ================= Constantes ================= */
-const APP_V = 9; // subirla junto con CACHE en sw.js en cada publicación
+const APP_V = 10; // subirla junto con CACHE en sw.js en cada publicación
 const MEALS = [['des', 'Desayuno'], ['alm', 'Almuerzo'], ['mer', 'Merienda'], ['cen', 'Cena'], ['snk', 'Snack']];
 const ACTS = [
   [1.2, 'Sedentario (oficina, casi no camino)'],
@@ -233,41 +233,60 @@ function foodSug() {
       <span>${f.r ? '🍳 ' : ''}${esc(f.n)}</span><small>${f.k} kcal · P ${f.p} g /100 g</small></button>`).join('')}</div>` : '<p class="hint">Sin resultados.</p>')
     + `<div class="links"><button class="link" data-a="newfood">+ Crear alimento “${esc(q)}”</button><button class="link" data-a="newrec">+ Receta “${esc(q)}”</button></div>`;
 }
-// Cantidad: por unidades (huevo, banana, feta…) o por gramos. "q" es lo que se escribe en el campo.
+// Cantidad: modo 'u' (unidades: huevo, banana…), 'ml' (líquidos) o 'g' (gramos). "q" es lo que se escribe en el campo.
 const fmtN = n => String(r1(n)).replace('.', ',');
+const niceN = v => String(v >= 10 ? r0(v) : r1(v)); // redondeo al convertir entre modos
 const unitWord = (f, n) => f?.r?.por ? (n === 1 ? 'porción' : 'porciones') : (n === 1 ? 'unidad' : 'unidades');
-const qtyG = (f, q, byU) => byU && f?.u ? num(q) * f.u : num(q);
-const amtLabel = (f, byU) => byU && f?.u ? (f.r?.por ? 'Porciones' : 'Unidades') : 'Gramos';
-function amtChips(f, byU, act, tog) {
-  const u = byU && f?.u;
-  return `<div class="chips">${u ? [0.5, 1, 2, 3].map(n => `<button class="chip" data-a="${act}" data-g="${n}">${n === 0.5 ? '½' : n}</button>`).join('')
-      : [50, 100, 150, 200].map(g => `<button class="chip" data-a="${act}" data-g="${g}">${g} g</button>`).join('')}
-    ${f?.u ? `<button class="chip alt" data-a="${tog}">${u ? 'Poner en gramos' : `Por ${f.r?.por ? 'porción' : 'unidad'} (${f.u} g)`}</button>` : ''}</div>`;
+const fixMode = (f, mode) => mode === 'u' && f?.u ? 'u' : mode === 'ml' && f?.ml ? 'ml' : 'g';
+const defMode = f => f?.u ? 'u' : f?.ml ? 'ml' : 'g';
+const factor = (f, mode) => ({ u: f?.u, ml: f?.ml }[fixMode(f, mode)] || 1); // gramos por unidad / por ml
+const qtyG = (f, q, mode) => num(q) * factor(f, mode);
+const defQty = f => ({ u: '1', ml: f.k >= 250 || /vinagre|aceto|salsa|jarabe|miel|jugo de lim/i.test(f.n) ? '15' : '200', g: '100' }[defMode(f)]);
+const amtLabel = (f, mode) => ({ u: f?.r?.por ? 'Porciones' : 'Unidades', ml: 'Mililitros (ml)', g: 'Gramos' }[fixMode(f, mode)]);
+function amtChips(f, mode, act, tog) {
+  mode = fixMode(f, mode);
+  const spoon = f?.ml && (f.k >= 250 || /vinagre|aceto|salsa|jarabe|miel|jugo de lim/i.test(f.n)); // aceites, miel, aderezos: cucharadas
+  const chips = {
+    u: [0.5, 1, 2, 3].map(n => [n, n === 0.5 ? '½' : n]),
+    ml: spoon ? [[5, '1 cdita (5 ml)'], [15, '1 cda (15 ml)'], [30, '2 cdas (30 ml)']] : [[100, '100 ml'], [200, '1 vaso (200 ml)'], [250, '250 ml'], [500, '500 ml']],
+    g: [50, 100, 150, 200].map(g => [g, `${g} g`]),
+  }[mode];
+  const other = [
+    f?.u && mode !== 'u' && ['u', `Por ${f.r?.por ? 'porción' : 'unidad'} (${f.u} g)`],
+    f?.ml && mode !== 'ml' && ['ml', 'En mililitros'],
+    mode !== 'g' && ['g', 'En gramos'],
+  ].filter(Boolean);
+  return `<div class="chips">${chips.map(([v, l]) => `<button class="chip" data-a="${act}" data-g="${v}">${l}</button>`).join('')}
+    ${other.map(([m, l]) => `<button class="chip alt" data-a="${tog}" data-m="${m}">${l}</button>`).join('')}</div>`;
 }
-// Texto de cantidad de un ítem registrado: "2 unidades · 100 g" o "150 g"
-const qtyTxt = m => m.un ? `${fmtN(m.un)} ${unitWord(foodById(m.fid), m.un)} · ${r0(m.g)} g` : `${r0(m.g)} g`;
-function prevHtml(x, g, byU) {
-  return `<div class="prev"><b>${fmt(x.k)} kcal</b>${byU ? `<span>${r0(g)} g</span>` : ''}<span class="p">P ${r1(x.p)}</span><span class="c">C ${r1(x.c)}</span><span class="f">G ${r1(x.f)}</span></div>`;
+// Texto de cantidad de un ítem registrado: "2 unidades · 100 g", "250 ml · 258 g" o "150 g"
+const qtyTxt = m => m.un ? `${fmtN(m.un)} ${unitWord(foodById(m.fid), m.un)} · ${r0(m.g)} g`
+  : m.vol ? `${fmtN(m.vol)} ml · ${r0(m.g)} g` : `${r0(m.g)} g`;
+// Guarda en el ítem cómo se cargó (unidades o ml) además de los gramos
+function setQty(it, mode, q) { delete it.un; delete it.vol; if (mode === 'u') it.un = r1(num(q)); else if (mode === 'ml') it.vol = r1(num(q)); return it; }
+const itemMode = (m, f) => m.un && f?.u ? 'u' : m.vol && f?.ml ? 'ml' : 'g';
+function prevHtml(x, g, showG) {
+  return `<div class="prev"><b>${fmt(x.k)} kcal</b>${showG ? `<span>${r0(g)} g</span>` : ''}<span class="p">P ${r1(x.p)}</span><span class="c">C ${r1(x.c)}</span><span class="f">G ${r1(x.f)}</span></div>`;
 }
 function foodPrev() {
   const f = ui.food && foodById(ui.food); if (!f) return '';
-  const g = qtyG(f, ui.grams, ui.byUnit);
-  return prevHtml(macro(f, g), g, ui.byUnit && f.u);
+  const mode = fixMode(f, ui.qMode), g = qtyG(f, ui.grams, mode);
+  return prevHtml(macro(f, g), g, mode !== 'g');
 }
 function foodForm() {
   const f = ui.food && foodById(ui.food); if (!f) return '';
   return `<div class="sel">
     <div class="selh"><b>${esc(f.n)}</b><button class="x" data-a="cancelfood" aria-label="Cancelar">✕</button></div>
-    <small class="mute">Por 100 g: ${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f}${f.fb ? ` · Fibra ${f.fb}` : ''}${f.u ? ` · 1 unidad ≈ ${f.u} g` : ''}</small>
+    <small class="mute">Por 100 g: ${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f}${f.fb ? ` · Fibra ${f.fb}` : ''}${f.u ? ` · 1 unidad ≈ ${f.u} g` : ''}${f.ml && f.ml !== 1 ? ` · 1 ml = ${String(f.ml).replace('.', ',')} g` : ''}</small>
     <small class="src">${f.fdc ? `Fuente: USDA FoodData Central · ficha nº ${f.fdc}`
       : f.off ? `Fuente: Open Food Facts · código ${esc(f.bc)} (datos de la etiqueta)`
       : f.r ? `Receta propia · ${f.r.items.length} ingredientes${f.r.por ? ` · 1 porción ≈ ${f.u} g` : ''} · <button class="link" data-a="editrec" data-id="${esc(f.id)}">Editar receta</button>`
       : 'Alimento propio (creado por ti)'}</small>
     <div class="grid2">
-      <label>${amtLabel(f, ui.byUnit)}<input id="fg" type="number" inputmode="decimal" min="0" step="any" value="${esc(ui.grams)}"></label>
+      <label>${amtLabel(f, ui.qMode)}<input id="fg" type="number" inputmode="decimal" min="0" step="any" value="${esc(ui.grams)}"></label>
       <label>Comida<select id="fm">${MEALS.map(([k, l]) => `<option value="${k}"${k === ui.meal ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
     </div>
-    ${amtChips(f, ui.byUnit, 'grams', 'unitmode')}
+    ${amtChips(f, ui.qMode, 'grams', 'unitmode')}
     <div id="fprev">${foodPrev()}</div>
     <button class="btn pri wide" data-a="addfood">Añadir</button>
   </div>`;
@@ -290,6 +309,7 @@ function newFoodForm() {
       <label>Kcal<input id="nf-k" type="number" inputmode="decimal" step="any" min="0" placeholder="auto" value="${val(v.k)}"></label>
     </div>
     <label>Gramos por unidad o porción (opcional)<input id="nf-u" type="number" inputmode="decimal" step="any" min="0" placeholder="ej. 1 barra = 40" value="${val(v.u)}"></label>
+    <label class="chk"><input id="nf-l" type="checkbox"${v.liq ? ' checked' : ''}> Es un líquido: lo cargo en ml (la etiqueta dice “por 100 ml”)</label>
     <button class="btn pri wide" data-a="savefood">Guardar alimento</button>
   </div>`;
 }
@@ -324,8 +344,8 @@ function vComida() {
 }
 function editPrev() {
   const m = getDay(ui.date).meals.find(x => x.id === ui.editMeal); if (!m) return '';
-  const f = foodById(m.fid), g = qtyG(f, ui.eGrams, ui.eUnit);
-  return prevHtml(rescale(m, g), g, ui.eUnit && f?.u);
+  const f = foodById(m.fid), mode = fixMode(f, ui.eMode), g = qtyG(f, ui.eGrams, mode);
+  return prevHtml(rescale(m, g), g, mode !== 'g');
 }
 function mealEdit(m) {
   const f = foodById(m.fid);
@@ -333,10 +353,10 @@ function mealEdit(m) {
     <div class="selh"><b>${esc(m.n)}</b><button class="x" data-a="canceledit" aria-label="Cancelar">✕</button></div>
     ${f?.fdc ? `<small class="src">Fuente: USDA FoodData Central · ficha nº ${f.fdc}</small>` : ''}
     <div class="grid2">
-      <label>${amtLabel(f, ui.eUnit)}<input id="eg" type="number" inputmode="decimal" min="0" step="any" value="${esc(ui.eGrams)}"></label>
+      <label>${amtLabel(f, ui.eMode)}<input id="eg" type="number" inputmode="decimal" min="0" step="any" value="${esc(ui.eGrams)}"></label>
       <label>Comida<select id="em">${MEALS.map(([k, l]) => `<option value="${k}"${k === m.meal ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
     </div>
-    ${amtChips(f, ui.eUnit, 'egrams', 'eunitmode')}
+    ${amtChips(f, ui.eMode, 'egrams', 'eunitmode')}
     <div id="eprevm">${editPrev()}</div>
     <div class="grid2"><button class="btn danger" data-a="delmeal" data-id="${m.id}">Borrar</button><button class="btn pri" data-a="saveedit">Guardar</button></div>
   </div>`;
@@ -403,10 +423,11 @@ function recPrev() {
     ${c.u ? `<div><span>Por porción</span><b>${fmt(c.t.k / c.por)} kcal</b><small>${c.u} g</small></div>` : ''}
   </div>`;
 }
-// Ingrediente: en unidades (it.un) si el alimento tiene peso por unidad (ej. huevos), si no en gramos (it.g)
-const ingByU = it => it.un != null && !!foodById(it.fid)?.u;
-const ingG = it => ingByU(it) ? num(it.un) * foodById(it.fid).u : num(it.g);
-const ingKcal = it => { const f = foodById(it.fid); if (!f) return ''; const g = ingG(it); return `${fmt(f.k * g / 100)} kcal${ingByU(it) ? ` · ${r0(g)} g` : ''}`; };
+// Ingrediente: en unidades (it.un, ej. huevos), en ml (it.vol, ej. leche) o en gramos (it.g)
+const ingMode = it => { const f = foodById(it.fid); return it.un != null && f?.u ? 'u' : it.vol != null && f?.ml ? 'ml' : 'g'; };
+const ingQ = it => ({ u: it.un, ml: it.vol, g: it.g }[ingMode(it)]);
+const ingG = it => qtyG(foodById(it.fid), ingQ(it), ingMode(it));
+const ingKcal = it => { const f = foodById(it.fid); if (!f) return ''; const g = ingG(it); return `${fmt(f.k * g / 100)} kcal${ingMode(it) !== 'g' ? ` · ${r0(g)} g` : ''}`; };
 function vRecipe() {
   const r = ui.rec;
   return `<section class="card">
@@ -418,7 +439,7 @@ function vRecipe() {
     <p class="small mute">Elige cada ingrediente en el estado en que lo pesas (crudo o cocido).</p>
     ${r.items.length ? r.items.map((it, i) => { const f = foodById(it.fid); return `<div class="row">
         <div class="grow"><b>${esc(f ? f.n : '(alimento borrado)')}</b><small id="ri${i}">${ingKcal(it)}</small></div>
-        <label class="inl"><input type="number" inputmode="decimal" min="0" step="any" data-ri="${i}" value="${esc(ingByU(it) ? it.un : it.g)}"> ${ingByU(it) ? 'u' : 'g'}</label>
+        <label class="inl"><input type="number" inputmode="decimal" min="0" step="any" data-ri="${i}" value="${esc(ingQ(it))}"> ${ingMode(it)}</label>
         <button class="x" data-a="delri" data-i="${i}" aria-label="Quitar ingrediente">✕</button></div>`; }).join('')
       : '<p class="hint">Todavía no hay ingredientes. Búscalos abajo.</p>'}
     <input id="rq" class="search" type="search" placeholder="Añadir ingrediente: carne, huevo, pan rallado…" value="${esc(r.q)}" autocomplete="off">
@@ -510,17 +531,18 @@ async function lookupCode(code) {
   toast('Buscando el producto…');
   try {
     const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 9000);
-    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name_es,product_name,generic_name_es,brands,serving_quantity,nutriments`, { signal: ctl.signal });
+    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name_es,product_name,generic_name_es,brands,quantity,serving_quantity,nutriments`, { signal: ctl.signal });
     clearTimeout(to);
     const d = r.ok ? await r.json() : null, p = d?.status === 1 && d.product;
     if (!p) { toast('No está en Open Food Facts'); return form({ bc: code }); }
     const nu = p.nutriments || {}, g = k => nu[k + '_100g'] ?? '';
     const name = (p.product_name_es || p.product_name || p.generic_name_es || '').trim(), brand = (p.brands || '').split(',')[0].trim();
     const kc = nu['energy-kcal_100g'] ?? (nu['energy_100g'] ? nu['energy_100g'] / 4.184 : '');
+    const liq = /\d\s*(ml|cl|l|lt|litros?)\b/i.test(p.quantity || ''); // el paquete viene en ml o litros
     form({
       bc: code, off: true, n: name && brand && !norm(name).includes(norm(brand)) ? `${name} (${brand})` : (name || brand),
       k: kc === '' ? '' : r0(kc), p: g('proteins') === '' ? '' : r1(g('proteins')), c: g('carbohydrates') === '' ? '' : r1(g('carbohydrates')),
-      f: g('fat') === '' ? '' : r1(g('fat')), fb: g('fiber') === '' ? 0 : r1(g('fiber')), u: num(p.serving_quantity) > 0 ? r0(num(p.serving_quantity)) : '',
+      f: g('fat') === '' ? '' : r1(g('fat')), fb: g('fiber') === '' ? 0 : r1(g('fiber')), liq, u: !liq && num(p.serving_quantity) > 0 ? r0(num(p.serving_quantity)) : '',
     });
     toast(kc === '' ? 'Encontrado, pero faltan valores: complétalos con la etiqueta' : '✓ Producto encontrado');
   } catch (e) {
@@ -775,7 +797,7 @@ const ACT = {
     const n = $('#cn').value.trim(), k = ui.mealOpen;
     if (!n) return toast('Ponle un nombre');
     const it = getDay(ui.date).meals.filter(m => m.meal === k);
-    const c = { id: uid(), n, meal: k, items: it.map(m => ({ fid: m.fid, n: m.n, g: m.g, ...(m.un ? { un: m.un } : {}), k: m.k, p: m.p, c: m.c, f: m.f })) };
+    const c = { id: uid(), n, meal: k, items: it.map(m => ({ fid: m.fid, n: m.n, g: m.g, ...(m.un ? { un: m.un } : {}), ...(m.vol ? { vol: m.vol } : {}), k: m.k, p: m.p, c: m.c, f: m.f })) };
     S.combos ||= [];
     const i = S.combos.findIndex(x => norm(x.n) === norm(n));
     if (i >= 0 && !confirm(`Ya tienes una comida llamada “${S.combos[i].n}”. ¿Reemplazarla?`)) return;
@@ -787,7 +809,7 @@ const ACT = {
     const meal = ui.mealOpen || ui.meal, d = dayW(ui.date);
     for (const i of c.items) {
       const f = foodById(i.fid), x = itemMacro(i);
-      d.meals.push({ id: uid(), meal, fid: i.fid, n: f ? f.n : i.n, g: i.g, ...(i.un ? { un: i.un } : {}), k: r1(x.k), p: r1(x.p), c: r1(x.c), f: r1(x.f) });
+      d.meals.push({ id: uid(), meal, fid: i.fid, n: f ? f.n : i.n, g: i.g, ...(i.un ? { un: i.un } : {}), ...(i.vol ? { vol: i.vol } : {}), k: r1(x.k), p: r1(x.p), c: r1(x.c), f: r1(x.f) });
     }
     save(); ui.foodQ = ''; toast(`✓ ${c.n} · ${fmt(comboSum(c).k)} kcal`); render();
   },
@@ -805,13 +827,15 @@ const ACT = {
   },
   editrec: el => {
     const f = S.foods.find(x => x.id === el.dataset.id); if (!f?.r) return;
-    ui.rec = { id: f.id, n: f.n, items: f.r.items.map(i => ({ fid: i.fid, g: String(i.g), ...(i.un ? { un: String(i.un) } : {}) })), w: f.r.w ? String(f.r.w) : '', por: f.r.por ? String(f.r.por) : '', q: '' };
+    ui.rec = { id: f.id, n: f.n, items: f.r.items.map(i => ({ fid: i.fid, g: String(i.g), ...(i.un ? { un: String(i.un) } : {}), ...(i.vol ? { vol: String(i.vol) } : {}) })), w: f.r.w ? String(f.r.w) : '', por: f.r.por ? String(f.r.por) : '', q: '' };
     ui.food = null; render(); scrollTo(0, 0);
   },
   closerec: () => { ui.rec = null; render(); scrollTo(0, 0); },
   addri: el => {
     const f = foodById(el.dataset.id); if (!f) return;
-    ui.rec.items.push(f.u ? { fid: f.id, g: String(f.u), un: '1' } : { fid: f.id, g: '100' }); ui.rec.q = '';
+    const md = defMode(f), q = defQty(f);
+    ui.rec.items.push(md === 'u' ? { fid: f.id, g: String(f.u), un: q } : md === 'ml' ? { fid: f.id, g: String(r1(q * f.ml)), vol: q } : { fid: f.id, g: q });
+    ui.rec.q = '';
     render(); focus(`[data-ri="${ui.rec.items.length - 1}"]`, true);
   },
   delri: el => { ui.rec.items.splice(+el.dataset.i, 1); render(); },
@@ -819,7 +843,7 @@ const ACT = {
     const r = ui.rec, n = r.n.trim();
     if (!n) { toast('Ponle un nombre a la receta'); return focus('#rn'); }
     const items = r.items.filter(i => foodById(i.fid) && ingG(i) > 0)
-      .map(i => ({ fid: i.fid, g: r1(ingG(i)), ...(ingByU(i) ? { un: r1(num(i.un)) } : {}) }));
+      .map(i => setQty({ fid: i.fid, g: r1(ingG(i)) }, ingMode(i), ingQ(i)));
     if (!items.length) return toast('Añade al menos un ingrediente con sus gramos');
     const c = recCalc({ ...r, items });
     const food = { id: r.id || 'c:' + uid(), n, ...c.per, u: c.u, r: { items, w: num(r.w) > 0 ? num(r.w) : 0, por: c.por } };
@@ -827,7 +851,7 @@ const ACT = {
     if (i >= 0) S.foods[i] = food; else S.foods.unshift(food);
     save(); ui.rec = null;
     toast(`✓ Receta guardada · ${food.k} kcal/100 g`);
-    if (ui.tab === 'comida' && ui.mealOpen) { ui.food = food.id; ui.byUnit = !!food.u; ui.grams = food.u ? '1' : '100'; }
+    if (ui.tab === 'comida' && ui.mealOpen) { ui.food = food.id; ui.qMode = defMode(food); ui.grams = defQty(food); }
     render(); scrollTo(0, 0);
   },
   delrec: () => {
@@ -837,9 +861,11 @@ const ACT = {
   editmeal: el => {
     const m = getDay(ui.date).meals.find(x => x.id === el.dataset.id); if (!m) return;
     const f = foodById(m.fid);
-    // por unidades si se cargó así, o si los gramos son unidades justas (ej. huevos cargados antes como 100 g)
-    ui.eUnit = !!f?.u && (!!m.un || Math.abs(m.g / f.u - Math.round(m.g / f.u)) < 0.01);
-    ui.eGrams = ui.eUnit ? String(m.un || r1(m.g / f.u)) : String(m.g);
+    // como se cargó (unidades / ml); si fue en gramos y son unidades justas (ej. huevos de antes, 100 g) → unidades
+    let mode = itemMode(m, f);
+    if (mode === 'g' && f?.u && Math.abs(m.g / f.u - Math.round(m.g / f.u)) < 0.01) mode = 'u';
+    ui.eMode = mode;
+    ui.eGrams = mode === 'u' ? String(m.un || r1(m.g / f.u)) : mode === 'ml' ? String(m.vol) : String(m.g);
     ui.editMeal = m.id; ui.food = null; render(); focus('#eg', true);
   },
   canceledit: () => { ui.editMeal = null; render(); },
@@ -847,11 +873,11 @@ const ACT = {
   saveedit: () => {
     const m = dayW(ui.date).meals.find(x => x.id === ui.editMeal);
     if (!m) return;
-    const f = foodById(m.fid), byU = !!(ui.eUnit && f?.u), g = qtyG(f, ui.eGrams, byU);
-    if (g <= 0) return toast(byU ? 'Indica cuántas unidades' : 'Indica los gramos');
+    const f = foodById(m.fid), mode = fixMode(f, ui.eMode), g = qtyG(f, ui.eGrams, mode);
+    if (g <= 0) return toast('Indica la cantidad');
     const x = rescale(m, g), to = $('#em').value, moved = to !== m.meal;
     Object.assign(m, { g: r1(g), meal: to, k: r1(x.k), p: r1(x.p), c: r1(x.c), f: r1(x.f) });
-    if (byU) m.un = r1(num(ui.eGrams)); else delete m.un;
+    setQty(m, mode, ui.eGrams);
     save(); ui.editMeal = null;
     toast(moved ? `✓ Movido a ${mealName(to)}` : `✓ ${m.n} · ${fmt(m.k)} kcal`); render();
   },
@@ -859,28 +885,29 @@ const ACT = {
 
   pickfood: el => {
     const f = foodById(el.dataset.id); if (!f) return;
-    ui.food = f.id; ui.byUnit = !!f.u; ui.grams = f.u ? '1' : '100'; ui.foodQ = ''; render(); focus('#fg', true);
+    ui.food = f.id; ui.qMode = defMode(f); ui.grams = defQty(f); ui.foodQ = ''; render(); focus('#fg', true);
   },
   grams: el => { ui.grams = el.dataset.g; $('#fg').value = ui.grams; $('#fprev').innerHTML = foodPrev(); },
-  // Cambiar entre unidades y gramos, convirtiendo lo que ya estaba escrito
-  unitmode: () => {
-    const f = foodById(ui.food); if (!f?.u) return;
-    ui.grams = String(r1(ui.byUnit ? num(ui.grams) * f.u : num(ui.grams) / f.u)); ui.byUnit = !ui.byUnit;
+  // Cambiar entre unidades / ml / gramos, convirtiendo lo que ya estaba escrito
+  unitmode: el => {
+    const f = foodById(ui.food); if (!f) return;
+    const from = fixMode(f, ui.qMode), to = fixMode(f, el.dataset.m);
+    ui.grams = niceN(qtyG(f, ui.grams, from) / factor(f, to)); ui.qMode = to;
     render(); focus('#fg', true);
   },
-  eunitmode: () => {
-    const m = getDay(ui.date).meals.find(x => x.id === ui.editMeal), f = m && foodById(m.fid); if (!f?.u) return;
-    ui.eGrams = String(r1(ui.eUnit ? num(ui.eGrams) * f.u : num(ui.eGrams) / f.u)); ui.eUnit = !ui.eUnit;
+  eunitmode: el => {
+    const m = getDay(ui.date).meals.find(x => x.id === ui.editMeal), f = m && foodById(m.fid); if (!f) return;
+    const from = fixMode(f, ui.eMode), to = fixMode(f, el.dataset.m);
+    ui.eGrams = niceN(qtyG(f, ui.eGrams, from) / factor(f, to)); ui.eMode = to;
     render(); focus('#eg', true);
   },
   cancelfood: () => { ui.food = null; render(); },
   addfood: () => {
-    const f = foodById(ui.food), byU = !!(ui.byUnit && f?.u), g = qtyG(f, ui.grams, byU);
-    if (!f || g <= 0) return toast(byU ? 'Indica cuántas unidades' : 'Indica los gramos');
-    const m = macro(f, g), it = { id: uid(), meal: ui.meal, fid: f.id, n: f.n, g: r1(g), k: r1(m.k), p: r1(m.p), c: r1(m.c), f: r1(m.f) };
-    if (byU) it.un = r1(num(ui.grams));
+    const f = foodById(ui.food), mode = fixMode(f, ui.qMode), g = qtyG(f, ui.grams, mode);
+    if (!f || g <= 0) return toast('Indica la cantidad');
+    const m = macro(f, g), it = setQty({ id: uid(), meal: ui.meal, fid: f.id, n: f.n, g: r1(g), k: r1(m.k), p: r1(m.p), c: r1(m.c), f: r1(m.f) }, mode, ui.grams);
     dayW(ui.date).meals.push(it);
-    save(); ui.food = null; toast(`✓ ${f.n} · ${byU ? fmtN(it.un) + ' ' + unitWord(f, it.un) + ' · ' : ''}${fmt(m.k)} kcal`); render();
+    save(); ui.food = null; toast(`✓ ${f.n} · ${mode === 'g' ? '' : qtyTxt(it).split(' · ')[0] + ' · '}${fmt(m.k)} kcal`); render();
   },
   newfood: () => { ui.newFood = true; ui.nf = { n: ui.foodQ.trim() }; ui.foodQ = ''; render(); focus(ui.nf.n ? '#nf-p' : '#nf-n'); },
   closenew: () => { ui.newFood = false; ui.nf = null; render(); },
@@ -893,6 +920,7 @@ const ACT = {
     if (v.bc) { food.bc = v.bc; S.foods = S.foods.filter(x => x.bc !== v.bc); } // un solo alimento por código
     if (v.off) food.off = 1;
     if (v.fb) food.fb = v.fb;
+    if ($('#nf-l')?.checked) food.ml = 1; // etiqueta por 100 ml: se toma 1 ml ≈ 1 g
     S.foods.unshift(food); save(); ui.newFood = false; ui.nf = null;
     ACT.pickfood({ dataset: { id: food.id } });
   },
@@ -1040,7 +1068,7 @@ document.addEventListener('input', e => {
   else if (t.id === 'rq') { ui.rec.q = t.value; $('#rsug').innerHTML = recSug(); }
   else if (t.id === 'rw' || t.id === 'rp') { ui.rec[t.id === 'rw' ? 'w' : 'por'] = t.value; $('#rprev').innerHTML = recPrev(); }
   else if (t.dataset.ri !== undefined) {
-    const i = +t.dataset.ri, it = ui.rec.items[i]; it[ingByU(it) ? 'un' : 'g'] = t.value;
+    const i = +t.dataset.ri, it = ui.rec.items[i]; it[{ u: 'un', ml: 'vol', g: 'g' }[ingMode(it)]] = t.value;
     $('#ri' + i).textContent = ingKcal(ui.rec.items[i]); $('#rprev').innerHTML = recPrev();
   }
   else if (t.id === 'emin') { ui.minutes = t.value; $('#eprev').innerHTML = exPrev(); }
