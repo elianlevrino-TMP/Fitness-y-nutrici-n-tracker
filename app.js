@@ -145,7 +145,7 @@ function lastSession(name, before) {
 function defaultMeal() { const h = new Date().getHours(); return h < 11 ? 'des' : h < 16 ? 'alm' : h < 20 ? 'mer' : 'cen'; }
 const ui = {
   tab: S.profile ? 'hoy' : 'perfil', date: today(),
-  foodQ: '', food: null, grams: '', meal: defaultMeal(), newFood: false, nfName: '',
+  foodQ: '', food: null, grams: '', meal: defaultMeal(), newFood: false, nf: null,
   exQ: '', exSel: null, sets: [], minutes: '', editId: null, progEx: '',
 };
 
@@ -226,6 +226,7 @@ function foodSug() {
       : `<p class="hint">Busca entre ${FOODS.length} alimentos con valores oficiales del USDA, o crea los tuyos con los datos de la etiqueta.</p>`)
       + '<button class="link" data-a="newrec">+ Crear receta casera</button>';
   }
+  if (/^\d{8,14}$/.test(q)) return `<button class="btn wide" data-a="lookup" data-c="${q}">Buscar el código ${q}</button>`;
   const res = search(allFoods(), q, 15);
   return comboList(q) + (res.length ? `<div class="list">${res.map(f => `<button class="item" data-a="pickfood" data-id="${esc(f.id)}">
       <span>${f.r ? '🍳 ' : ''}${esc(f.n)}</span><small>${f.k} kcal · P ${f.p} g /100 g</small></button>`).join('')}</div>` : '<p class="hint">Sin resultados.</p>')
@@ -242,6 +243,7 @@ function foodForm() {
     <div class="selh"><b>${esc(f.n)}</b><button class="x" data-a="cancelfood" aria-label="Cancelar">✕</button></div>
     <small class="mute">Por 100 g: ${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f}${f.fb ? ` · Fibra ${f.fb}` : ''}${f.u ? ` · 1 unidad ≈ ${f.u} g` : ''}</small>
     <small class="src">${f.fdc ? `Fuente: USDA FoodData Central · ficha nº ${f.fdc}`
+      : f.off ? `Fuente: Open Food Facts · código ${esc(f.bc)} (datos de la etiqueta)`
       : f.r ? `Receta propia · ${f.r.items.length} ingredientes${f.r.por ? ` · 1 porción ≈ ${f.u} g` : ''} · <button class="link" data-a="editrec" data-id="${esc(f.id)}">Editar receta</button>`
       : 'Alimento propio (creado por ti)'}</small>
     <div class="grid2">
@@ -255,17 +257,22 @@ function foodForm() {
 }
 function newFoodForm() {
   if (!ui.newFood) return '';
+  const v = ui.nf || {}, val = x => x || x === 0 ? esc(x) : '';
+  const head = v.off
+    ? `<small class="src">Datos de <b>Open Food Facts</b> · código ${esc(v.bc)}. Son los de la etiqueta, cargados por usuarios: compáralos con tu paquete antes de guardar.</small>`
+    : v.bc ? `<small class="src">Código ${esc(v.bc)}: este producto no está en Open Food Facts. Copia los valores de la etiqueta y la próxima vez que lo escanees aparecerá solo.</small>` : '';
   return `<div class="sel">
     <div class="selh"><b>Nuevo alimento</b><button class="x" data-a="closenew" aria-label="Cancelar">✕</button></div>
+    ${head}
     <small class="mute">Valores <b>por 100 g</b> (míralos en la etiqueta). Si dejas las kcal vacías, se calculan solas.</small>
-    <label>Nombre<input id="nf-n" value="${esc(ui.nfName)}" autocomplete="off"></label>
+    <label>Nombre<input id="nf-n" value="${esc(v.n || '')}" autocomplete="off"></label>
     <div class="grid4">
-      <label>Proteína<input id="nf-p" type="number" inputmode="decimal" step="any" min="0"></label>
-      <label>Carbos<input id="nf-c" type="number" inputmode="decimal" step="any" min="0"></label>
-      <label>Grasas<input id="nf-f" type="number" inputmode="decimal" step="any" min="0"></label>
-      <label>Kcal<input id="nf-k" type="number" inputmode="decimal" step="any" min="0" placeholder="auto"></label>
+      <label>Proteína<input id="nf-p" type="number" inputmode="decimal" step="any" min="0" value="${val(v.p)}"></label>
+      <label>Carbos<input id="nf-c" type="number" inputmode="decimal" step="any" min="0" value="${val(v.c)}"></label>
+      <label>Grasas<input id="nf-f" type="number" inputmode="decimal" step="any" min="0" value="${val(v.f)}"></label>
+      <label>Kcal<input id="nf-k" type="number" inputmode="decimal" step="any" min="0" placeholder="auto" value="${val(v.k)}"></label>
     </div>
-    <label>Gramos por unidad (opcional)<input id="nf-u" type="number" inputmode="decimal" step="any" min="0" placeholder="ej. 1 barra = 40"></label>
+    <label>Gramos por unidad o porción (opcional)<input id="nf-u" type="number" inputmode="decimal" step="any" min="0" placeholder="ej. 1 barra = 40" value="${val(v.u)}"></label>
     <button class="btn pri wide" data-a="savefood">Guardar alimento</button>
   </div>`;
 }
@@ -337,7 +344,8 @@ function vMeal() {
   </section>
   <section class="card">
     <h3>Añadir a ${l}</h3>
-    ${ui.food || ui.newFood ? '' : `<input id="fq" class="search" type="search" placeholder="Buscar: pollo, arroz, huevo…" value="${esc(ui.foodQ)}" autocomplete="off">`}
+    ${ui.food || ui.newFood ? '' : `<div class="srow"><input id="fq" class="search" type="search" placeholder="Buscar: pollo, arroz, huevo…" value="${esc(ui.foodQ)}" autocomplete="off">
+      <button class="btn scanb" data-a="scan" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>`}
     <div id="fsug">${foodSug()}</div>
     ${foodForm()}${newFoodForm()}
   </section>`;
@@ -407,6 +415,98 @@ function vRecipe() {
     <button class="btn pri wide" data-a="saverec">Guardar receta</button>
     ${r.id ? '<button class="btn danger wide" data-a="delrec">Borrar receta</button>' : ''}
   </section>`;
+}
+
+/* ---------- Escáner de código de barras + Open Food Facts ---------- */
+const SCAN_ICO = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>';
+const BC_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
+// Dígito verificador de EAN/UPC (evita buscar números mal tipeados)
+function validBarcode(c) {
+  if (!/^\d{8,14}$/.test(c)) return false;
+  const d = c.split('').map(Number), chk = d.pop();
+  const s = d.reverse().reduce((a, n, i) => a + n * (i % 2 ? 1 : 3), 0);
+  return (10 - s % 10) % 10 === chk;
+}
+// Lector: el del navegador si existe (Android/Chrome); si no (iPhone), uno libre que se descarga solo esa vez
+async function getDetector() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const ok = await BarcodeDetector.getSupportedFormats(), fm = BC_FORMATS.filter(f => ok.includes(f));
+      if (fm.length) return new BarcodeDetector({ formats: fm });
+    } catch (e) { /* usar el alternativo */ }
+  }
+  const m = await import('https://cdn.jsdelivr.net/npm/barcode-detector@3.0.8/dist/es/ponyfill.js');
+  return new m.BarcodeDetector({ formats: BC_FORMATS });
+}
+const Scan = { on: false, stream: null, t: 0 };
+async function openScan() {
+  closeScan();
+  const el = document.createElement('div');
+  el.id = 'scan'; el.className = 'scan';
+  el.innerHTML = `<div class="scanv"><video playsinline muted></video><div class="frame"></div></div>
+    <p class="scanmsg" id="scanmsg">Abriendo la cámara…</p>
+    <div class="srow"><input id="scode" class="search" type="text" inputmode="numeric" placeholder="o escribe el número" autocomplete="off">
+      <button class="btn pri" data-a="scanmanual">Buscar</button></div>
+    <button class="btn wide" data-a="scanclose">Cancelar</button>`;
+  document.body.appendChild(el);
+  Scan.on = true;
+  const msg = t => { const m = $('#scanmsg'); if (m) m.textContent = t; };
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('nocam');
+    const [stream, det] = await Promise.all([
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }),
+      getDetector(),
+    ]);
+    if (!Scan.on) return stream.getTracks().forEach(t => t.stop());
+    Scan.stream = stream;
+    const v = $('#scan video'); v.srcObject = stream; await v.play();
+    msg('Apunta al código de barras del paquete');
+    const loop = async () => {
+      if (!Scan.on) return;
+      try {
+        const r = await det.detect(v), c = r.find(x => validBarcode(x.rawValue));
+        if (c) { navigator.vibrate?.(60); closeScan(); return lookupCode(c.rawValue); }
+      } catch (e) { /* cuadro sin código */ }
+      Scan.t = setTimeout(loop, 180);
+    };
+    loop();
+  } catch (e) {
+    msg(e.name === 'NotAllowedError' ? 'No hay permiso para usar la cámara. Puedes escribir el número del código.' : 'No se pudo abrir la cámara. Puedes escribir el número del código.');
+    focus('#scode');
+  }
+}
+function closeScan() {
+  Scan.on = false; clearTimeout(Scan.t);
+  Scan.stream?.getTracks().forEach(t => t.stop()); Scan.stream = null;
+  $('#scan')?.remove();
+}
+// Busca primero en tus alimentos (funciona sin internet) y si no, en Open Food Facts
+async function lookupCode(code) {
+  code = String(code).replace(/\D/g, '');
+  if (!validBarcode(code)) return toast('Ese número no parece un código de barras válido');
+  const mine = S.foods.find(f => f.bc === code);
+  if (mine) return ACT.pickfood({ dataset: { id: mine.id } });
+  const form = nf => { Object.assign(ui, { newFood: true, food: null, foodQ: '', nf }); render(); focus(nf.k ? '#nf-n' : '#nf-p'); };
+  toast('Buscando el producto…');
+  try {
+    const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 9000);
+    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name_es,product_name,generic_name_es,brands,serving_quantity,nutriments`, { signal: ctl.signal });
+    clearTimeout(to);
+    const d = r.ok ? await r.json() : null, p = d?.status === 1 && d.product;
+    if (!p) { toast('No está en Open Food Facts'); return form({ bc: code }); }
+    const nu = p.nutriments || {}, g = k => nu[k + '_100g'] ?? '';
+    const name = (p.product_name_es || p.product_name || p.generic_name_es || '').trim(), brand = (p.brands || '').split(',')[0].trim();
+    const kc = nu['energy-kcal_100g'] ?? (nu['energy_100g'] ? nu['energy_100g'] / 4.184 : '');
+    form({
+      bc: code, off: true, n: name && brand && !norm(name).includes(norm(brand)) ? `${name} (${brand})` : (name || brand),
+      k: kc === '' ? '' : r0(kc), p: g('proteins') === '' ? '' : r1(g('proteins')), c: g('carbohydrates') === '' ? '' : r1(g('carbohydrates')),
+      f: g('fat') === '' ? '' : r1(g('fat')), fb: g('fiber') === '' ? 0 : r1(g('fiber')), u: num(p.serving_quantity) > 0 ? r0(num(p.serving_quantity)) : '',
+    });
+    toast(kc === '' ? 'Encontrado, pero faltan valores: complétalos con la etiqueta' : '✓ Producto encontrado');
+  } catch (e) {
+    toast('Sin conexión: carga los valores de la etiqueta');
+    form({ bc: code });
+  }
 }
 
 /* ---------- Entreno ---------- */
@@ -742,17 +842,24 @@ const ACT = {
     dayW(ui.date).meals.push({ id: uid(), meal: ui.meal, fid: f.id, n: f.n, g, k: r1(m.k), p: r1(m.p), c: r1(m.c), f: r1(m.f) });
     save(); ui.food = null; toast(`✓ ${f.n} · ${fmt(m.k)} kcal`); render();
   },
-  newfood: () => { ui.newFood = true; ui.nfName = ui.foodQ.trim(); ui.foodQ = ''; render(); focus(ui.nfName ? '#nf-p' : '#nf-n'); },
-  closenew: () => { ui.newFood = false; render(); },
+  newfood: () => { ui.newFood = true; ui.nf = { n: ui.foodQ.trim() }; ui.foodQ = ''; render(); focus(ui.nf.n ? '#nf-p' : '#nf-n'); },
+  closenew: () => { ui.newFood = false; ui.nf = null; render(); },
   savefood: () => {
     const n = $('#nf-n').value.trim(), p = num($('#nf-p').value), c = num($('#nf-c').value), f = num($('#nf-f').value);
-    const k = num($('#nf-k').value) || r0(p * 4 + c * 4 + f * 9), u = num($('#nf-u').value);
+    const k = num($('#nf-k').value) || r0(p * 4 + c * 4 + f * 9), u = num($('#nf-u').value), v = ui.nf || {};
     if (!n) return toast('Ponle un nombre');
     if (k <= 0) return toast('Faltan los valores nutricionales');
     const food = { id: 'c:' + uid(), n, k, p, c, f, u };
-    S.foods.unshift(food); save(); ui.newFood = false;
+    if (v.bc) { food.bc = v.bc; S.foods = S.foods.filter(x => x.bc !== v.bc); } // un solo alimento por código
+    if (v.off) food.off = 1;
+    if (v.fb) food.fb = v.fb;
+    S.foods.unshift(food); save(); ui.newFood = false; ui.nf = null;
     ACT.pickfood({ dataset: { id: food.id } });
   },
+  scan: () => openScan(),
+  scanclose: () => closeScan(),
+  scanmanual: () => { const c = $('#scode').value; closeScan(); lookupCode(c); },
+  lookup: el => lookupCode(el.dataset.c),
   delmeal: el => {
     const d = dayW(ui.date), m = d.meals.find(x => x.id === el.dataset.id); if (!m) return;
     d.meals = d.meals.filter(x => x.id !== m.id); ui.editMeal = null; save(); toast(`Borrado: ${m.n}`); render();
@@ -928,10 +1035,11 @@ document.addEventListener('keydown', e => {
   if (id === 'fg') ACT.addfood();
   else if (id === 'eg') ACT.saveedit();
   else if (id === 'ac-p') { const b = $('[data-a="login"], [data-a="signup"]'); ACT[b.dataset.a](b); }
-  else if (id === 'fq') { const b = $('#fsug [data-a="pickfood"]'); if (b) b.click(); }
+  else if (id === 'fq') { const b = $('#fsug [data-a="pickfood"], #fsug [data-a="lookup"]'); if (b) b.click(); }
   else if (id === 'eq') { const b = $('#esug [data-a="pickex"], #esug [data-a="newex"]'); if (b) b.click(); }
   else if (id === 'rq') { const b = $('#rsug [data-a="addri"]'); if (b) b.click(); }
   else if (id === 'cn') ACT.savecombo();
+  else if (id === 'scode') ACT.scanmanual();
 });
 
 /* ================= Inicio ================= */

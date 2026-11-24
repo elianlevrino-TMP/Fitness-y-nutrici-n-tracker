@@ -22,6 +22,14 @@ Los nombres están traducidos al español rioplatense. Algunos son equivalentes 
 tiene el alimento local exacto (por ejemplo, "Pescadilla / merluza" usa los valores de *whiting*).
 Descarga original: https://fdc.nal.usda.gov/download-datasets
 
+### Productos envasados (código de barras)
+El botón de escanear lee el código con la cámara y busca el producto en **Open Food Facts**
+(https://world.openfoodfacts.org), una base pública y gratuita con los valores de las etiquetas, cargados
+por usuarios (licencia ODbL; se cita la fuente en la app). Solo se envía el número del código. Los valores
+se muestran para revisarlos contra el paquete antes de guardar, y el producto queda guardado como alimento
+propio: la próxima vez se encuentra sin internet. Si el navegador no trae lector de códigos (iPhone), se usa
+la librería libre `barcode-detector` (versión fija, desde cdn.jsdelivr.net).
+
 ## Archivos
 | Archivo | Qué es |
 |---|---|
