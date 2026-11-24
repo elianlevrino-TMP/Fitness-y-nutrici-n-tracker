@@ -181,6 +181,12 @@ const Sync = (() => {
       if (navigator.onLine) { try { await sync(); await call('/auth/v1/logout', { method: 'POST' }); } catch (e) { /* igual se cierra */ } }
       signOutLocal();
     },
+    // Token de la sesión (renovado si está por vencer) para llamar a funciones propias, ej. /api/etiqueta
+    async token() {
+      if (!auth) return null;
+      if (auth.expires_at - 60 < Date.now() / 1000) await refresh();
+      return auth?.access_token || null;
+    },
     pending() { // ¿hay cambios sin subir?
       if (!auth) return false;
       if (S.profile && hash(settingsStr()) !== meta.set) return true;

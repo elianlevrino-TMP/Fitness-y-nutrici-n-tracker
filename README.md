@@ -22,6 +22,15 @@ Los nombres están traducidos al español rioplatense. Algunos son equivalentes 
 tiene el alimento local exacto (por ejemplo, "Pescadilla / merluza" usa los valores de *whiting*).
 Descarga original: https://fdc.nal.usda.gov/download-datasets
 
+### Foto de la etiqueta (IA)
+En "Nuevo alimento", **Completar con una foto de la etiqueta** manda la foto (achicada) a la función
+`api/etiqueta.js` de Vercel, que la pasa a un modelo de OpenAI y devuelve los valores por 100 g / 100 ml
+(si la etiqueta los da por porción, la función los convierte). Siempre se revisan antes de guardar.
+- La función solo responde a usuarios con sesión iniciada en FitLog (lo verifica con Supabase).
+- **La clave de OpenAI no está en el código**: va en Vercel → Settings → Environment Variables como
+  `OPENAI_API_KEY`. Opcional: `OPENAI_MODEL` para cambiar el modelo (por defecto `gpt-5.6-luna`).
+- Conviene poner un tope de gasto mensual en el panel de OpenAI (Settings → Limits).
+
 ### Productos envasados (código de barras)
 El botón de escanear lee el código con la cámara y busca el producto en **Open Food Facts**
 (https://world.openfoodfacts.org), una base pública y gratuita con los valores de las etiquetas, cargados

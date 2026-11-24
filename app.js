@@ -20,7 +20,7 @@ const dayLabel = k => {
 };
 
 /* ================= Constantes ================= */
-const APP_V = 10; // subirla junto con CACHE en sw.js en cada publicación
+const APP_V = 11; // subirla junto con CACHE en sw.js en cada publicación
 const MEALS = [['des', 'Desayuno'], ['alm', 'Almuerzo'], ['mer', 'Merienda'], ['cen', 'Cena'], ['snk', 'Snack']];
 const ACTS = [
   [1.2, 'Sedentario (oficina, casi no camino)'],
@@ -225,7 +225,7 @@ function foodSug() {
     return comboList('') + (rec.length
       ? `<p class="lbl">Recientes</p><div class="chips">${rec.map(f => `<button class="chip" data-a="pickfood" data-id="${esc(f.id)}">${esc(f.n)}</button>`).join('')}</div>`
       : `<p class="hint">Busca entre ${FOODS.length} alimentos con valores oficiales del USDA, o crea los tuyos con los datos de la etiqueta.</p>`)
-      + '<button class="link" data-a="newrec">+ Crear receta casera</button>';
+      + '<div class="links"><button class="link" data-a="newfood">+ Alimento nuevo (con foto de la etiqueta)</button><button class="link" data-a="newrec">+ Crear receta casera</button></div>';
   }
   if (/^\d{8,14}$/.test(q)) return `<button class="btn wide" data-a="lookup" data-c="${q}">Buscar el código ${q}</button>`;
   const res = search(allFoods(), q, 15);
@@ -247,7 +247,7 @@ function amtChips(f, mode, act, tog) {
   mode = fixMode(f, mode);
   const spoon = f?.ml && (f.k >= 250 || /vinagre|aceto|salsa|jarabe|miel|jugo de lim/i.test(f.n)); // aceites, miel, aderezos: cucharadas
   const chips = {
-    u: [0.5, 1, 2, 3].map(n => [n, n === 0.5 ? '½' : n]),
+    u: (f?.u < 15 ? [1, 2, 4, 6] : [0.5, 1, 2, 3]).map(n => [n, n === 0.5 ? '½' : n]), // cosas chicas (galletitas): más unidades
     ml: spoon ? [[5, '1 cdita (5 ml)'], [15, '1 cda (15 ml)'], [30, '2 cdas (30 ml)']] : [[100, '100 ml'], [200, '1 vaso (200 ml)'], [250, '250 ml'], [500, '500 ml']],
     g: [50, 100, 150, 200].map(g => [g, `${g} g`]),
   }[mode];
@@ -296,10 +296,14 @@ function newFoodForm() {
   const v = ui.nf || {}, val = x => x || x === 0 ? esc(x) : '';
   const head = v.off
     ? `<small class="src">Datos de <b>Open Food Facts</b> · código ${esc(v.bc)}. Son los de la etiqueta, cargados por usuarios: compáralos con tu paquete antes de guardar.</small>`
-    : v.bc ? `<small class="src">Código ${esc(v.bc)}: este producto no está en Open Food Facts. Copia los valores de la etiqueta y la próxima vez que lo escanees aparecerá solo.</small>` : '';
+    : v.bc && !v.ai ? `<small class="src">Código ${esc(v.bc)}: este producto no está en Open Food Facts. Copia los valores de la etiqueta (o sácale una foto) y la próxima vez que lo escanees aparecerá solo.</small>` : '';
+  const conv = v.ai && !/^100 (g|ml)$/.test(v.ai.base) ? ` La etiqueta daba los valores por ${esc(v.ai.base)}: ya están pasados a 100.` : '';
+  const ai = v.ai ? `<small class="src ai">📷 Valores leídos por IA de tu foto.${conv}${v.ai.unit ? ` Según la etiqueta, ${esc(v.ai.unit)}.` : ''} Revísalos contra el paquete antes de guardar.${v.ai.notes ? ` Ojo: ${esc(v.ai.notes)}` : ''}</small>` : '';
+  const photo = ui.nfBusy ? '<p class="hint">⏳ Leyendo la etiqueta… (unos segundos)</p>'
+    : `<label class="btn wide photo">📷 ${v.ai ? 'Probar con otra foto' : 'Completar con una foto de la etiqueta'}<input id="nf-photo" type="file" accept="image/*" hidden></label>`;
   return `<div class="sel">
     <div class="selh"><b>Nuevo alimento</b><button class="x" data-a="closenew" aria-label="Cancelar">✕</button></div>
-    ${head}
+    ${head}${photo}${ai}
     <small class="mute">Valores <b>por 100 g</b> (míralos en la etiqueta). Si dejas las kcal vacías, se calculan solas.</small>
     <label>Nombre<input id="nf-n" value="${esc(v.n || '')}" autocomplete="off"></label>
     <div class="grid4">
@@ -549,6 +553,45 @@ async function lookupCode(code) {
     toast('Sin conexión: carga los valores de la etiqueta');
     form({ bc: code });
   }
+}
+
+/* ---------- Foto de la etiqueta → IA (función propia /api/etiqueta) ---------- */
+// Guarda lo ya escrito en el formulario para no perderlo al volver a dibujarlo
+function grabNf() {
+  const g = id => $(id)?.value ?? '';
+  if (!$('#nf-n')) return;
+  Object.assign(ui.nf ||= {}, { n: g('#nf-n').trim(), p: g('#nf-p'), c: g('#nf-c'), f: g('#nf-f'), k: g('#nf-k'), u: g('#nf-u'), liq: !!$('#nf-l')?.checked });
+}
+// Achica la foto (máx. 1280 px) para que suba rápido y cueste menos
+async function shrinkImage(file, max = 1280) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ko(new Error('No se pudo abrir la foto')); i.src = url; });
+    const s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.85);
+  } finally { URL.revokeObjectURL(url); }
+}
+async function readLabel(file) {
+  grabNf(); ui.nfBusy = true; render();
+  try {
+    const image = await shrinkImage(file), token = await Sync.token();
+    const r = await fetch('api/etiqueta', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ image }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'No se pudo leer la etiqueta');
+    const v = ui.nf ||= {}, keep = x => (x == null ? '' : x);
+    Object.assign(v, {
+      n: v.n || j.n || '', k: keep(j.k), p: keep(j.p), c: keep(j.c), f: keep(j.f), fb: j.fb || 0,
+      u: j.u || v.u || '', liq: !!j.liq, ai: { base: j.base || '100 g', unit: j.unit || '', notes: j.notes || '' },
+    });
+    toast(j.k == null ? 'Leída, pero faltan valores: complétalos' : '✓ Etiqueta leída');
+  } catch (e) {
+    toast(e instanceof TypeError ? 'Sin conexión: leer la foto necesita internet' : e.message);
+  } finally { ui.nfBusy = false; render(); }
 }
 
 /* ---------- Entreno ---------- */
@@ -1078,6 +1121,7 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'fm') ui.meal = t.value;
   else if (t.id === 'dpick' && t.value) { ui.date = t.value; render(); }
+  else if (t.id === 'nf-photo' && t.files[0]) readLabel(t.files[0]);
   else if (t.id === 'pex') { ui.progEx = t.value; render(); }
   else if (t.id === 'wt') {
     const w = num(t.value), d = dayW(ui.date);

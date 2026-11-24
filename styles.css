@@ -203,3 +203,5 @@ input:focus, select:focus { outline: none; border-color: var(--acc); }
 .chip.alt { background: transparent; border: 1px dashed var(--line); color: var(--acc); }
 .chk { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; margin-top: 10px; }
 .chk input { width: auto; margin: 2px 0 0; }
+.btn.photo { display: flex; justify-content: center; margin: 8px 0 4px; cursor: pointer; }
+.src.ai { color: var(--acc); }
