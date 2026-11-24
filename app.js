@@ -31,7 +31,7 @@ const GOALS = { cut: { l: 'Perder grasa', adj: -400 }, maint: { l: 'Mantener pes
 
 /* ================= Datos (guardados en el teléfono) ================= */
 const KEY = 'fitlog-v1';
-const DEF = () => ({ profile: null, foods: [], exs: [], days: {} });
+const DEF = () => ({ profile: null, foods: [], exs: [], combos: [], days: {} });
 let S = load();
 function load() {
   try { const d = JSON.parse(localStorage.getItem(KEY)); return d && typeof d === 'object' ? Object.assign(DEF(), d) : DEF(); }
@@ -206,19 +206,30 @@ function vHoy() {
 }
 
 /* ---------- Comida ---------- */
+// Comidas guardadas ("Mi desayuno"): las de la comida abierta primero; con búsqueda, las que coinciden por nombre
+function comboList(q) {
+  const k = ui.mealOpen || ui.meal;
+  const cs = (S.combos || []).filter(c => !q || norm(c.n).includes(norm(q)))
+    .sort((a, b) => (b.meal === k) - (a.meal === k));
+  if (!cs.length) return '';
+  return `<p class="lbl">Comidas guardadas</p><div class="list">${cs.map(c => `<button class="item" data-a="addcombo" data-id="${c.id}">
+      <span class="grow"><b>${esc(c.n)}</b><small class="ell">${esc(c.items.map(i => i.n).join(', '))}</small></span>
+      <small>${fmt(comboSum(c).k)} kcal ＋</small></button>`).join('')}</div>`;
+}
 function foodSug() {
   if (ui.food || ui.newFood) return '';
   const q = ui.foodQ.trim();
   if (!q) {
     const rec = recentFoods();
-    return rec.length
+    return comboList('') + (rec.length
       ? `<p class="lbl">Recientes</p><div class="chips">${rec.map(f => `<button class="chip" data-a="pickfood" data-id="${esc(f.id)}">${esc(f.n)}</button>`).join('')}</div>`
-      : `<p class="hint">Busca entre ${FOODS.length} alimentos con valores oficiales del USDA, o crea los tuyos con los datos de la etiqueta.</p>`;
+      : `<p class="hint">Busca entre ${FOODS.length} alimentos con valores oficiales del USDA, o crea los tuyos con los datos de la etiqueta.</p>`)
+      + '<button class="link" data-a="newrec">+ Crear receta casera</button>';
   }
   const res = search(allFoods(), q, 15);
-  return (res.length ? `<div class="list">${res.map(f => `<button class="item" data-a="pickfood" data-id="${esc(f.id)}">
-      <span>${esc(f.n)}</span><small>${f.k} kcal · P ${f.p} g /100 g</small></button>`).join('')}</div>` : '<p class="hint">Sin resultados.</p>')
-    + `<button class="link" data-a="newfood">+ Crear “${esc(q)}”</button>`;
+  return comboList(q) + (res.length ? `<div class="list">${res.map(f => `<button class="item" data-a="pickfood" data-id="${esc(f.id)}">
+      <span>${f.r ? '🍳 ' : ''}${esc(f.n)}</span><small>${f.k} kcal · P ${f.p} g /100 g</small></button>`).join('')}</div>` : '<p class="hint">Sin resultados.</p>')
+    + `<div class="links"><button class="link" data-a="newfood">+ Crear alimento “${esc(q)}”</button><button class="link" data-a="newrec">+ Receta “${esc(q)}”</button></div>`;
 }
 function foodPrev() {
   const f = ui.food && foodById(ui.food); if (!f) return '';
@@ -230,12 +241,14 @@ function foodForm() {
   return `<div class="sel">
     <div class="selh"><b>${esc(f.n)}</b><button class="x" data-a="cancelfood" aria-label="Cancelar">✕</button></div>
     <small class="mute">Por 100 g: ${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f}${f.fb ? ` · Fibra ${f.fb}` : ''}${f.u ? ` · 1 unidad ≈ ${f.u} g` : ''}</small>
-    <small class="src">${f.fdc ? `Fuente: USDA FoodData Central · ficha nº ${f.fdc}` : 'Alimento propio (creado por ti)'}</small>
+    <small class="src">${f.fdc ? `Fuente: USDA FoodData Central · ficha nº ${f.fdc}`
+      : f.r ? `Receta propia · ${f.r.items.length} ingredientes${f.r.por ? ` · 1 porción ≈ ${f.u} g` : ''} · <button class="link" data-a="editrec" data-id="${esc(f.id)}">Editar receta</button>`
+      : 'Alimento propio (creado por ti)'}</small>
     <div class="grid2">
       <label>Gramos<input id="fg" type="number" inputmode="decimal" min="0" step="any" value="${esc(ui.grams)}"></label>
       <label>Comida<select id="fm">${MEALS.map(([k, l]) => `<option value="${k}"${k === ui.meal ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
     </div>
-    <div class="chips">${f.u ? [1, 2, 3].map(n => `<button class="chip" data-a="grams" data-g="${n * f.u}">${n} u</button>`).join('') : ''}${[50, 100, 150, 200].map(g => `<button class="chip" data-a="grams" data-g="${g}">${g} g</button>`).join('')}</div>
+    <div class="chips">${f.u ? [1, 2, 3].map(n => `<button class="chip" data-a="grams" data-g="${n * f.u}">${n} ${f.r?.por ? 'porc.' : 'u'}</button>`).join('') : ''}${[50, 100, 150, 200].map(g => `<button class="chip" data-a="grams" data-g="${g}">${g} g</button>`).join('')}</div>
     <div id="fprev">${foodPrev()}</div>
     <button class="btn pri wide" data-a="addfood">Añadir</button>
   </div>`;
@@ -316,12 +329,83 @@ function vMeal() {
         <div class="grow"><b>${esc(m.n)}</b><small>${r0(m.g)} g · P ${r0(m.p)} · C ${r0(m.c)} · G ${r0(m.f)}</small></div>
         <span class="kc">${fmt(m.k)}</span><span class="chev">✎</span></button>`).join('')
       : '<p class="hint">Todavía no agregaste nada a esta comida.</p>'}
+    ${!it.length || ui.editMeal ? '' : ui.saveCombo ? `<div class="sel">
+        <label>Nombre para guardarla<input id="cn" value="${esc(comboDefName(k))}" autocomplete="off"></label>
+        <small class="mute">Después la agregas entera con un toque, en cualquier día.</small>
+        <div class="grid2"><button class="btn" data-a="cancelcombo">Cancelar</button><button class="btn pri" data-a="savecombo">Guardar</button></div>
+      </div>` : '<button class="link" data-a="askcombo">☆ Guardar esta comida para repetirla</button>'}
   </section>
   <section class="card">
     <h3>Añadir a ${l}</h3>
     ${ui.food || ui.newFood ? '' : `<input id="fq" class="search" type="search" placeholder="Buscar: pollo, arroz, huevo…" value="${esc(ui.foodQ)}" autocomplete="off">`}
     <div id="fsug">${foodSug()}</div>
     ${foodForm()}${newFoodForm()}
+  </section>`;
+}
+
+/* ---------- Comidas guardadas y recetas ---------- */
+// Macros actuales de un ítem guardado (si el alimento ya no existe, usa lo que se guardó)
+function itemMacro(i) { const f = foodById(i.fid); return f ? macro(f, i.g) : { k: i.k || 0, p: i.p || 0, c: i.c || 0, f: i.f || 0 }; }
+const comboSum = c => mealSum(c.items.map(itemMacro));
+function comboDefName(k) {
+  const base = 'Mi ' + mealName(k).toLowerCase(), used = new Set((S.combos || []).map(c => norm(c.n)));
+  if (!used.has(norm(base))) return base;
+  for (let n = 2; ; n++) if (!used.has(norm(`${base} ${n}`))) return `${base} ${n}`;
+}
+// Receta: suma de ingredientes → valores por 100 g del plato terminado
+function recCalc(r) {
+  const t = { k: 0, p: 0, c: 0, f: 0, fb: 0, g: 0 };
+  for (const it of r.items) {
+    const f = foodById(it.fid), g = num(it.g); if (!f || g <= 0) continue;
+    t.k += f.k * g / 100; t.p += f.p * g / 100; t.c += f.c * g / 100; t.f += f.f * g / 100; t.fb += (f.fb || 0) * g / 100; t.g += g;
+  }
+  const w = num(r.w) > 0 ? num(r.w) : t.g, por = Math.max(0, Math.round(num(r.por))), x = w > 0 ? 100 / w : 0;
+  return { t, w, por, u: por > 0 ? r0(w / por) : 0, per: { k: r0(t.k * x), p: r1(t.p * x), c: r1(t.c * x), f: r1(t.f * x), fb: r1(t.fb * x) } };
+}
+function recSug() {
+  const r = ui.rec, q = r.q.trim(); if (!q) return '';
+  const res = search(allFoods().filter(f => f.id !== r.id), q, 8);
+  return res.length ? `<div class="list">${res.map(f => `<button class="item" data-a="addri" data-id="${esc(f.id)}">
+      <span>${f.r ? '🍳 ' : ''}${esc(f.n)}</span><small>${f.k} kcal /100 g</small></button>`).join('')}</div>`
+    : '<p class="hint">Sin resultados. Si no está, créalo primero como alimento (con los datos de la etiqueta).</p>';
+}
+function recPrev() {
+  const c = recCalc(ui.rec);
+  if (!c.t.g) return '';
+  return `<div class="split rsum">
+    <div><span>Plato entero</span><b>${fmt(c.t.k)} kcal</b><small>${fmt(c.w)} g</small></div>
+    <div><span>Por 100 g</span><b>${c.per.k} kcal</b><small>P ${c.per.p} · C ${c.per.c} · G ${c.per.f}</small></div>
+    ${c.u ? `<div><span>Por porción</span><b>${fmt(c.t.k / c.por)} kcal</b><small>${c.u} g</small></div>` : ''}
+  </div>`;
+}
+const ingKcal = it => { const f = foodById(it.fid); return f ? `${fmt(f.k * num(it.g) / 100)} kcal` : ''; };
+function vRecipe() {
+  const r = ui.rec;
+  return `<section class="card">
+    <button class="link" data-a="closerec">‹ Volver</button>
+    <h2>${r.id ? 'Editar receta' : 'Nueva receta'}</h2>
+    <p class="small mute">Arma un plato casero con sus ingredientes: la app suma todo, calcula los valores por 100 g y lo guarda como un alimento más para usarlo cualquier día.</p>
+    <label>Nombre<input id="rn" value="${esc(r.n)}" placeholder="ej. Milanesas de carne al horno" autocomplete="off"></label>
+    <p class="lbl">Ingredientes</p>
+    <p class="small mute">Elige cada ingrediente en el estado en que lo pesas (crudo o cocido).</p>
+    ${r.items.length ? r.items.map((it, i) => { const f = foodById(it.fid); return `<div class="row">
+        <div class="grow"><b>${esc(f ? f.n : '(alimento borrado)')}</b><small id="ri${i}">${ingKcal(it)}</small></div>
+        <label class="inl"><input type="number" inputmode="decimal" min="0" step="any" data-ri="${i}" value="${esc(it.g)}"> g</label>
+        <button class="x" data-a="delri" data-i="${i}" aria-label="Quitar ingrediente">✕</button></div>`; }).join('')
+      : '<p class="hint">Todavía no hay ingredientes. Búscalos abajo.</p>'}
+    <input id="rq" class="search" type="search" placeholder="Añadir ingrediente: carne, huevo, pan rallado…" value="${esc(r.q)}" autocomplete="off">
+    <div id="rsug">${recSug()}</div>
+  </section>
+  <section class="card">
+    <h3>Cuánto rinde</h3>
+    <div class="grid2">
+      <label>Peso final (g)<input id="rw" type="number" inputmode="decimal" min="0" step="any" value="${esc(r.w)}" placeholder="suma de ingredientes"></label>
+      <label>Porciones<input id="rp" type="number" inputmode="numeric" min="0" step="1" value="${esc(r.por)}" placeholder="opcional"></label>
+    </div>
+    <p class="small mute">Si pesas el plato ya cocinado, escríbelo: al cocinar se pierde o se absorbe agua y eso cambia los valores por 100 g. Si lo dejas vacío, se usa la suma de los ingredientes.</p>
+    <div id="rprev">${recPrev()}</div>
+    <button class="btn pri wide" data-a="saverec">Guardar receta</button>
+    ${r.id ? '<button class="btn danger wide" data-a="delrec">Borrar receta</button>' : ''}
   </section>`;
 }
 
@@ -511,9 +595,15 @@ function vPerfil() {
     ${st}
   </section>
   ${S.profile ? `
-  <section class="card"><h3>Mis alimentos</h3>
-    ${S.foods.length ? S.foods.map(f => `<div class="row"><div class="grow"><b>${esc(f.n)}</b><small>${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f} /100 g</small></div>
-      <button class="x" data-a="delfood" data-id="${esc(f.id)}" aria-label="Borrar">✕</button></div>`).join('') : '<p class="hint">Los alimentos que crees aparecerán aquí.</p>'}
+  <section class="card"><div class="cardh"><h3>Mis alimentos y recetas</h3><button class="link" data-a="newrec">+ Receta</button></div>
+    ${S.foods.length ? S.foods.map(f => `<div class="row"><div class="grow"><b>${f.r ? '🍳 ' : ''}${esc(f.n)}</b><small>${f.k} kcal · P ${f.p} · C ${f.c} · G ${f.f} /100 g${f.r ? ` · ${f.r.items.length} ingredientes` : ''}</small></div>
+      ${f.r ? `<button class="x" data-a="editrec" data-id="${esc(f.id)}" aria-label="Editar receta">✎</button>` : ''}
+      <button class="x" data-a="delfood" data-id="${esc(f.id)}" aria-label="Borrar">✕</button></div>`).join('') : '<p class="hint">Los alimentos y recetas que crees aparecerán aquí.</p>'}
+  </section>
+  <section class="card"><h3>Mis comidas guardadas</h3>
+    ${(S.combos || []).length ? S.combos.map(c => `<div class="row"><div class="grow"><b>${esc(c.n)}</b><small class="ell">${fmt(comboSum(c).k)} kcal · ${esc(c.items.map(i => i.n).join(', '))}</small></div>
+      <button class="x" data-a="delcombo" data-id="${c.id}" aria-label="Borrar">✕</button></div>`).join('')
+      : '<p class="hint">Abre una comida del día (por ejemplo tu desayuno) y toca “Guardar esta comida para repetirla”.</p>'}
   </section>
   <section class="card"><h3>Copia de seguridad</h3>
     <p class="small mute">Tus datos ya están guardados en tu cuenta. Si quieres, también puedes descargar una copia en un archivo.</p>
@@ -538,7 +628,7 @@ function render() {
   if (gate) { $('#top').innerHTML = ''; $('#view').innerHTML = vLogin(); return; }
   if (!S.profile) ui.tab = 'perfil';
   renderTop();
-  $('#view').innerHTML = VIEWS[ui.tab]();
+  $('#view').innerHTML = ui.rec ? vRecipe() : VIEWS[ui.tab]();
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.t === ui.tab));
 }
 let tt;
@@ -547,15 +637,81 @@ const focus = (id, sel) => { const el = $(id); if (el) { el.focus(); if (sel) el
 
 /* ================= Acciones ================= */
 const ACT = {
-  tab: el => { ui.tab = el.dataset.t; ui.mealOpen = null; ui.editMeal = null; render(); scrollTo(0, 0); },
-  day: el => { ui.date = addDays(ui.date, +el.dataset.n); ui.editId = null; ui.exSel = null; ui.editMeal = null; render(); },
+  tab: el => { ui.tab = el.dataset.t; ui.mealOpen = null; ui.editMeal = null; ui.saveCombo = false; ui.rec = null; render(); scrollTo(0, 0); },
+  day: el => { ui.date = addDays(ui.date, +el.dataset.n); ui.editId = null; ui.exSel = null; ui.editMeal = null; ui.saveCombo = false; render(); },
 
   // Comidas: abrir una, editar sus alimentos
   openmeal: el => {
-    Object.assign(ui, { tab: 'comida', mealOpen: el.dataset.m, meal: el.dataset.m, food: null, newFood: false, foodQ: '', editMeal: null });
+    Object.assign(ui, { tab: 'comida', mealOpen: el.dataset.m, meal: el.dataset.m, food: null, newFood: false, foodQ: '', editMeal: null, saveCombo: false });
     render(); scrollTo(0, 0);
   },
-  closemeal: () => { Object.assign(ui, { mealOpen: null, editMeal: null, food: null, newFood: false }); render(); scrollTo(0, 0); },
+  closemeal: () => { Object.assign(ui, { mealOpen: null, editMeal: null, food: null, newFood: false, saveCombo: false }); render(); scrollTo(0, 0); },
+
+  // Comidas guardadas
+  askcombo: () => { ui.saveCombo = true; render(); focus('#cn', true); },
+  cancelcombo: () => { ui.saveCombo = false; render(); },
+  savecombo: () => {
+    const n = $('#cn').value.trim(), k = ui.mealOpen;
+    if (!n) return toast('Ponle un nombre');
+    const it = getDay(ui.date).meals.filter(m => m.meal === k);
+    const c = { id: uid(), n, meal: k, items: it.map(m => ({ fid: m.fid, n: m.n, g: m.g, k: m.k, p: m.p, c: m.c, f: m.f })) };
+    S.combos ||= [];
+    const i = S.combos.findIndex(x => norm(x.n) === norm(n));
+    if (i >= 0 && !confirm(`Ya tienes una comida llamada “${S.combos[i].n}”. ¿Reemplazarla?`)) return;
+    if (i >= 0) S.combos[i] = { ...c, id: S.combos[i].id }; else S.combos.unshift(c);
+    save(); ui.saveCombo = false; toast(`☆ Guardada: ${n}`); render();
+  },
+  addcombo: el => {
+    const c = (S.combos || []).find(x => x.id === el.dataset.id); if (!c) return;
+    const meal = ui.mealOpen || ui.meal, d = dayW(ui.date);
+    for (const i of c.items) {
+      const f = foodById(i.fid), x = itemMacro(i);
+      d.meals.push({ id: uid(), meal, fid: i.fid, n: f ? f.n : i.n, g: i.g, k: r1(x.k), p: r1(x.p), c: r1(x.c), f: r1(x.f) });
+    }
+    save(); ui.foodQ = ''; toast(`✓ ${c.n} · ${fmt(comboSum(c).k)} kcal`); render();
+  },
+  delcombo: el => {
+    const c = (S.combos || []).find(x => x.id === el.dataset.id); if (!c) return;
+    if (!confirm(`¿Borrar “${c.n}” de tus comidas guardadas? (Lo ya registrado se mantiene)`)) return;
+    S.combos = S.combos.filter(x => x.id !== c.id); save(); render();
+  },
+
+  // Recetas
+  newrec: () => {
+    ui.rec = { id: null, n: ui.foodQ.trim(), items: [], w: '', por: '', q: '' };
+    ui.foodQ = ''; ui.food = null; ui.newFood = false;
+    render(); scrollTo(0, 0); focus(ui.rec.n ? '#rq' : '#rn');
+  },
+  editrec: el => {
+    const f = S.foods.find(x => x.id === el.dataset.id); if (!f?.r) return;
+    ui.rec = { id: f.id, n: f.n, items: f.r.items.map(i => ({ fid: i.fid, g: String(i.g) })), w: f.r.w ? String(f.r.w) : '', por: f.r.por ? String(f.r.por) : '', q: '' };
+    ui.food = null; render(); scrollTo(0, 0);
+  },
+  closerec: () => { ui.rec = null; render(); scrollTo(0, 0); },
+  addri: el => {
+    const f = foodById(el.dataset.id); if (!f) return;
+    ui.rec.items.push({ fid: f.id, g: String(f.u || 100) }); ui.rec.q = '';
+    render(); focus(`[data-ri="${ui.rec.items.length - 1}"]`, true);
+  },
+  delri: el => { ui.rec.items.splice(+el.dataset.i, 1); render(); },
+  saverec: () => {
+    const r = ui.rec, n = r.n.trim();
+    if (!n) { toast('Ponle un nombre a la receta'); return focus('#rn'); }
+    const items = r.items.filter(i => foodById(i.fid) && num(i.g) > 0).map(i => ({ fid: i.fid, g: num(i.g) }));
+    if (!items.length) return toast('Añade al menos un ingrediente con sus gramos');
+    const c = recCalc({ ...r, items });
+    const food = { id: r.id || 'c:' + uid(), n, ...c.per, u: c.u, r: { items, w: num(r.w) > 0 ? num(r.w) : 0, por: c.por } };
+    const i = S.foods.findIndex(f => f.id === food.id);
+    if (i >= 0) S.foods[i] = food; else S.foods.unshift(food);
+    save(); ui.rec = null;
+    toast(`✓ Receta guardada · ${food.k} kcal/100 g`);
+    if (ui.tab === 'comida' && ui.mealOpen) { ui.food = food.id; ui.grams = String(food.u || 100); }
+    render(); scrollTo(0, 0);
+  },
+  delrec: () => {
+    if (!confirm('¿Borrar esta receta? (Lo ya registrado se mantiene)')) return;
+    S.foods = S.foods.filter(f => f.id !== ui.rec.id); ui.rec = null; save(); render();
+  },
   editmeal: el => {
     const m = getDay(ui.date).meals.find(x => x.id === el.dataset.id); if (!m) return;
     ui.editMeal = m.id; ui.eGrams = String(m.g); ui.food = null; render(); focus('#eg', true);
@@ -733,6 +889,13 @@ document.addEventListener('input', e => {
   else if (t.id === 'fg') { ui.grams = t.value; $('#fprev').innerHTML = foodPrev(); }
   else if (t.id === 'eg') { ui.eGrams = t.value; $('#eprevm').innerHTML = editPrev(); }
   else if (t.id === 'eq') { ui.exQ = t.value; $('#esug').innerHTML = exSug(); }
+  else if (t.id === 'rn') ui.rec.n = t.value;
+  else if (t.id === 'rq') { ui.rec.q = t.value; $('#rsug').innerHTML = recSug(); }
+  else if (t.id === 'rw' || t.id === 'rp') { ui.rec[t.id === 'rw' ? 'w' : 'por'] = t.value; $('#rprev').innerHTML = recPrev(); }
+  else if (t.dataset.ri !== undefined) {
+    const i = +t.dataset.ri; ui.rec.items[i].g = t.value;
+    $('#ri' + i).textContent = ingKcal(ui.rec.items[i]); $('#rprev').innerHTML = recPrev();
+  }
   else if (t.id === 'emin') { ui.minutes = t.value; $('#eprev').innerHTML = exPrev(); }
   else if (t.dataset.set !== undefined) { ui.sets[+t.dataset.set][t.dataset.k] = t.value; $('#eprev').innerHTML = exPrev(); }
 });
@@ -767,6 +930,8 @@ document.addEventListener('keydown', e => {
   else if (id === 'ac-p') { const b = $('[data-a="login"], [data-a="signup"]'); ACT[b.dataset.a](b); }
   else if (id === 'fq') { const b = $('#fsug [data-a="pickfood"]'); if (b) b.click(); }
   else if (id === 'eq') { const b = $('#esug [data-a="pickex"], #esug [data-a="newex"]'); if (b) b.click(); }
+  else if (id === 'rq') { const b = $('#rsug [data-a="addri"]'); if (b) b.click(); }
+  else if (id === 'cn') ACT.savecombo();
 });
 
 /* ================= Inicio ================= */

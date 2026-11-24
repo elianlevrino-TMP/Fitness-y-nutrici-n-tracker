@@ -18,7 +18,7 @@ const Sync = (() => {
   function read(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
   function write(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin espacio */ } }
   const hash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h.toString(36) + ':' + s.length; };
-  const settingsStr = () => JSON.stringify({ profile: S.profile, foods: S.foods, exs: S.exs });
+  const settingsStr = () => JSON.stringify({ profile: S.profile, foods: S.foods, exs: S.exs, combos: S.combos || [] });
   const redirect = () => location.origin + location.pathname;
   function setStatus(state, msg = '') { st.state = state; st.msg = msg; if (state === 'ok') st.at = Date.now(); api.onStatus(); }
 
@@ -99,6 +99,7 @@ const Sync = (() => {
         S.profile = dirty ? S.profile : (d.profile || S.profile);
         S.foods = dirty ? unionBy(S.foods, d.foods, f => f.id) : (d.foods || []);
         S.exs = dirty ? unionBy(S.exs, d.exs, e => e.n) : (d.exs || []);
+        S.combos = dirty ? unionBy(S.combos || [], d.combos, c => c.id) : (d.combos || []);
         changed = true;
       }
       meta.set = hash(rs);

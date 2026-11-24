@@ -173,3 +173,13 @@ input:focus, select:focus { outline: none; border-color: var(--acc); }
 }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
 @media (max-width: 360px) { .ring { width: 110px; } .kv b { font-size: 18px; } }
+
+/* Comidas guardadas y recetas */
+.links { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.item .grow { display: flex; flex-direction: column; min-width: 0; }
+.item .grow b { font-weight: 600; }
+.ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .grow small.ell { white-space: nowrap; }
+.rsum { margin: 12px 0; }
+.rsum small { font-size: 12px; color: var(--mute); }
+.btn.danger.wide { margin-top: 8px; }
