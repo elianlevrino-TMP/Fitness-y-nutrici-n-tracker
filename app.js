@@ -20,6 +20,7 @@ const dayLabel = k => {
 };
 
 /* ================= Constantes ================= */
+const APP_V = 8; // subirla junto con CACHE en sw.js en cada publicación
 const MEALS = [['des', 'Desayuno'], ['alm', 'Almuerzo'], ['mer', 'Merienda'], ['cen', 'Cena'], ['snk', 'Snack']];
 const ACTS = [
   [1.2, 'Sedentario (oficina, casi no camino)'],
@@ -709,7 +710,8 @@ function vPerfil() {
     <p class="small mute">Tus datos ya están guardados en tu cuenta. Si quieres, también puedes descargar una copia en un archivo.</p>
     <div class="grid2"><button class="btn" data-a="export">Exportar</button>
       <label class="btn">Importar<input id="imp" type="file" accept="application/json,.json" hidden></label></div>
-  </section>` : ''}`;
+  </section>` : ''}
+  <p class="ver">FitLog · versión ${APP_V}</p>`;
 }
 
 /* ================= Render ================= */
@@ -1062,4 +1064,15 @@ Sync.init().then(r => {
   afterSync();
 });
 navigator.storage?.persist?.();
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js');
+// Actualización automática: al abrir o volver a la app se busca una versión nueva; cuando llega, se recarga sola
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  const hadSW = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadSW || reloading) return;
+    reloading = true; location.reload();
+  });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
