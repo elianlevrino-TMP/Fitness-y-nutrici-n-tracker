@@ -20,7 +20,7 @@ const dayLabel = k => {
 };
 
 /* ================= Constantes ================= */
-const APP_V = 11; // subirla junto con CACHE en sw.js en cada publicación
+const APP_V = 12; // subirla junto con CACHE en sw.js en cada publicación
 const MEALS = [['des', 'Desayuno'], ['alm', 'Almuerzo'], ['mer', 'Merienda'], ['cen', 'Cena'], ['snk', 'Snack']];
 const ACTS = [
   [1.2, 'Sedentario (oficina, casi no camino)'],
@@ -107,27 +107,84 @@ function weightOn(k) {
   for (const [d, v] of Object.entries(S.days)) if (v.weight && d <= k && d > bk) { bk = d; w = v.weight; }
   return w || S.profile?.weight || 70;
 }
-// Mifflin-St Jeor
+// Metabolismo basal: Mifflin-St Jeor (1990), la ecuación más precisa en la revisión de Frankenfield et al. 2005
 function bmr(k) { const p = S.profile, w = weightOn(k); return 10 * w + 6.25 * p.height - 5 * p.age + (p.sex === 'm' ? 5 : -161); }
+// Grasa corporal estimada por IMC, edad y sexo: Deurenberg et al. 1991 (Br J Nutr), error típico ±4 puntos
+function bodyFatKg(k) {
+  const p = S.profile, w = weightOn(k), bmi = w / (p.height / 100) ** 2;
+  return w * clamp(1.2 * bmi + 0.23 * p.age - 10.8 * (p.sex === 'm' ? 1 : 0) - 5.4, 5, 60) / 100;
+}
+// Energía de 1 kg de cambio de peso (no siempre 7700): parte es grasa (39,5 MJ/kg ≈ 9441 kcal) y parte
+// masa magra (7,6 MJ/kg ≈ 1816 kcal) — Hall, Lancet 2011. La proporción depende de tu grasa corporal
+// (ecuación de Forbes: ΔMagra/ΔPeso = 10,4 / (10,4 + kg de grasa)) — Hall, Br J Nutr 2007.
+function kcalPerKg(k) {
+  const fm = Math.max(bodyFatKg(k), 5), fat = fm / (10.4 + fm);
+  return fat * 9441 + (1 - fat) * 1816;
+}
+// Gasto de un entreno: solo lo que suma POR ENCIMA del reposo (MET − 1), escalado a tu basal real y con
+// +15% por el consumo posterior (EPOC). Fórmula de las Dietary Reference Intakes (IOM 2005):
+// ΔPAL = (MET − 1) × (1,15 / 0,9) × minutos / 1440  →  kcal = ΔPAL × basal
+const exKcal = (met, min, k) => Math.max(0, met - 1) * (1.15 / 0.9) * (min / 1440) * bmr(k);
+const wKcal = (w, k) => (S.profile && w.met && w.min ? exKcal(w.met, w.min, k) : w.kcal || 0);
 function totals(k) {
   const d = getDay(k), t = { k: 0, p: 0, c: 0, f: 0 };
   for (const m of d.meals) { t.k += m.k; t.p += m.p; t.c += m.c; t.f += m.f; }
-  t.ex = d.work.reduce((a, w) => a + w.kcal, 0);
+  t.ex = d.work.reduce((a, w) => a + wKcal(w, k), 0);
   if (!S.profile) return t;
   const w = weightOn(k);
   t.bmr = bmr(k);
-  t.base = t.bmr * S.profile.act;          // basal + vida diaria (sin entreno)
+  t.adj = S.profile.adj || 0;               // corrección según tu peso real (ajuste automático)
+  t.base = t.bmr * S.profile.act + t.adj;   // basal + vida diaria (sin entreno)
   t.out = t.base + t.ex;                    // gasto total del día
   t.goal = t.out + GOALS[S.profile.goal].adj; // lo que deberías comer
-  t.tP = S.profile.prot * w;
-  t.tF = 0.8 * w;
+  t.tP = S.profile.prot * w;                // 1,6–2,2 g/kg (Morton et al. 2018, Br J Sports Med)
+  t.tF = t.goal * 0.25 / 9;                 // 25% de las calorías (rango aceptable 20–35%, IOM 2005)
   t.tC = Math.max(0, (t.goal - t.tP * 4 - t.tF * 9) / 4);
   t.bal = t.k - t.out;
   return t;
 }
+/* ---------- Ajuste automático según tu peso real ----------
+   Con 3 semanas de datos: gasto real = lo que comiste en promedio − (cambio de peso × energía por kg).
+   Es el "método de balance de ingesta" validado con agua doblemente marcada (de Jonge et al. 2007, CALERIE),
+   con el cambio de reservas estimado por la tendencia del peso y kcalPerKg() en lugar de DXA.
+   Se compara con lo que estima la fórmula (basal × actividad + entrenos) y la diferencia es la corrección.
+   Solo se usan días "completos" (comiste al menos la mitad de tu objetivo) y la tendencia del peso
+   por regresión lineal, para que el agua o un día suelto no muevan el resultado. */
+const ADJ = { days: 21, minDays: 10, minWeigh: 4, minSpan: 14, minDiff: 100, step: 250, max: 600 };
+const dayNum = k => Math.round(new Date(k + 'T12:00:00').getTime() / 864e5);
+const round10 = n => Math.round(n / 10) * 10;
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+function adaptive() {
+  if (!S.profile) return null;
+  const end = today(), start = addDays(end, -(ADJ.days - 1)), cur = S.profile.adj || 0;
+  const ws = [], used = [];
+  for (let k = start; k <= end; k = addDays(k, 1)) {
+    const d = S.days[k]; if (!d) continue;
+    if (d.weight) ws.push({ x: dayNum(k), y: d.weight });
+    if (k < end && d.meals?.length) { // hoy no cuenta: el día no terminó
+      const t = totals(k);
+      if (t.k >= t.goal * 0.5) used.push({ eat: t.k, model: t.out - cur });
+    }
+  }
+  const span = ws.length > 1 ? ws[ws.length - 1].x - ws[0].x : 0;
+  const st = { cur, days: used.length, weigh: ws.length, span };
+  if (used.length < ADJ.minDays || ws.length < ADJ.minWeigh || span < ADJ.minSpan) return { ...st, ok: false };
+  // pendiente del peso (kg por día) por mínimos cuadrados
+  const mx = ws.reduce((a, p) => a + p.x, 0) / ws.length, my = ws.reduce((a, p) => a + p.y, 0) / ws.length;
+  const slope = ws.reduce((a, p) => a + (p.x - mx) * (p.y - my), 0) / ws.reduce((a, p) => a + (p.x - mx) ** 2, 0);
+  const eat = used.reduce((a, d) => a + d.eat, 0) / used.length, model = used.reduce((a, d) => a + d.model, 0) / used.length;
+  const rho = kcalPerKg(end), real = eat - slope * rho;
+  const target = clamp(round10(real - model), -ADJ.max, ADJ.max);
+  const next = clamp(cur + clamp(target - cur, -ADJ.step, ADJ.step), -ADJ.max, ADJ.max);
+  // después de aplicar un ajuste se espera una semana antes de proponer otro (cambios de a poco)
+  const wait = S.profile.adjAt && S.profile.adjAt > addDays(end, -7) ? addDays(S.profile.adjAt, 7) : '';
+  return { ...st, ok: true, eat, model: model + cur, real, rho, week: slope * 7, target, next, wait, propose: !wait && Math.abs(target - cur) >= ADJ.minDiff };
+}
+const fmtKg = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}${String(Math.abs(r1(n))).replace('.', ',')} kg`;
+const signK = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt(Math.abs(n))}`;
+
 const cleanSets = () => ui.sets.map(s => ({ kg: num(s.kg), reps: Math.round(num(s.reps)) })).filter(s => s.reps > 0);
 const exMinutes = (t, sets, manual) => num(manual) > 0 ? num(manual) : (t === 'f' ? sets.length * 3 : 0);
-const exKcal = (met, min, k) => met * weightOn(k) * min / 60;
 const volume = sets => (sets || []).reduce((a, s) => a + s.kg * s.reps, 0);
 const e1rm = s => s.reps === 1 ? s.kg : s.kg * (1 + s.reps / 30); // Epley
 const setsTxt = w => w.t === 'f'
@@ -186,6 +243,7 @@ function vHoy() {
       <div><span>Meta: ${GOALS[S.profile.goal].l}</span><b>${GOALS[S.profile.goal].adj > 0 ? '+' : ''}${GOALS[S.profile.goal].adj}</b></div>
     </div>
   </section>
+  ${ui.date === today() ? adjCard(false) : ''}
   <section class="card">
     <h3>Macros</h3>
     ${bar('Proteína', t.p, t.tP, 'p')}${bar('Carbohidratos', t.c, t.tC, 'c')}${bar('Grasas', t.f, t.tF, 'f')}
@@ -203,6 +261,42 @@ function vHoy() {
       <label class="inl"><input id="wt" type="number" inputmode="decimal" step="0.1" min="0" value="${d.weight || ''}" placeholder="${r1(weightOn(ui.date))}"> kg</label>
     </div>
     <p class="small mute">Pésate en ayunas. Se usa para recalcular tu gasto y tus macros.</p>
+  </section>`;
+}
+
+// Tarjeta del ajuste automático: en Progreso siempre (full); en Hoy solo cuando hay una propuesta
+function adjCard(full) {
+  const a = adaptive(); if (!a) return '';
+  const g = GOALS[S.profile.goal], exp = g.adj * 7 / kcalPerKg(today()), cur = a.cur;
+  const reset = full && cur ? `<button class="link" data-a="adjreset">Quitar el ajuste actual (${signK(cur)} kcal/día)</button>` : '';
+  if (!a.ok) {
+    if (!full) return '';
+    return `<section class="card"><h3>Ajuste según tu peso real</h3>
+      <p class="small mute">Con 2 o 3 semanas de datos, la app compara lo que comiste con cómo cambió tu peso. Si la fórmula se equivoca con tu gasto, te propone corregirlo.</p>
+      <div class="split">
+        <div><span>Días completos</span><b>${Math.min(a.days, ADJ.minDays)} / ${ADJ.minDays}</b></div>
+        <div><span>Pesajes</span><b>${Math.min(a.weigh, ADJ.minWeigh)} / ${ADJ.minWeigh}</b></div>
+        <div><span>Días entre el primero y el último</span><b>${Math.min(a.span, ADJ.minSpan)} / ${ADJ.minSpan}</b></div>
+      </div>
+      <p class="small mute">Para llegar: pésate en ayunas 2 o 3 veces por semana y registra todo lo que comes (un día cuenta como completo si comiste al menos la mitad de tu objetivo).</p>
+      ${reset}</section>`;
+  }
+  if (!full && (!a.propose || (S.profile.adjSkip && S.profile.adjSkip > addDays(today(), -7)))) return '';
+  const rest = totals(today()).base + g.adj, delta = a.next - cur;
+  return `<section class="card adj">
+    <h3>Ajuste según tu peso real</h3>
+    <p class="small">Últimas 3 semanas: comiste en promedio <b>${fmt(a.eat)} kcal/día</b> y tu peso cambió <b>${fmtKg(a.week)} por semana</b> (lo esperado para tu objetivo: ${fmtKg(exp)}).</p>
+    <div class="split">
+      <div><span>Gasto según la fórmula</span><b>${fmt(a.model)}</b></div>
+      <div><span>Gasto real estimado</span><b class="o">${fmt(a.real)}</b></div>
+    </div>
+    <p class="small mute">En tu caso, 1 kg de peso equivale a unas ${fmt(a.rho)} kcal (según tu grasa corporal estimada).</p>
+    ${a.propose ? `<p class="small">Parece que gastas <b>${delta > 0 ? 'más' : 'menos'}</b> de lo que calcula la fórmula. Propuesta: corregir tu gasto <b>${signK(delta)} kcal/día</b>${a.next !== a.target ? ' (de a poco; en una semana se revisa de nuevo)' : ''}.
+        En un día sin entreno, tu objetivo pasaría de <b>${fmt(rest)}</b> a <b>${fmt(rest + delta)}</b> kcal.</p>
+      <div class="grid2"><button class="btn" data-a="adjskip">Ahora no</button><button class="btn pri" data-a="adjapply" data-v="${a.next}">Aplicar</button></div>`
+    : a.wait ? `<p class="small mute">Ajuste actual: <b>${signK(cur)} kcal/día</b>. Se revisa de nuevo el ${shortDate(a.wait)}, con datos de esta semana.</p>`
+    : `<p class="small mute">✓ Tu objetivo está bien calibrado con tus datos reales${cur ? ` (ajuste actual: ${signK(cur)} kcal/día)` : ''}.</p>`}
+    ${reset}
   </section>`;
 }
 
@@ -634,10 +728,10 @@ function exForm() {
 function workList() {
   const d = getDay(ui.date);
   if (!d.work.length) return '<section class="card"><p class="hint">Sin entrenamiento registrado este día.</p></section>';
-  const tk = d.work.reduce((a, w) => a + w.kcal, 0);
+  const tk = d.work.reduce((a, w) => a + wKcal(w, ui.date), 0);
   return `<section class="card"><div class="cardh"><h3>Sesión</h3><span class="o">${fmt(tk)} kcal</span></div>
     ${d.work.map(w => `<div class="row"><div class="grow"><b>${esc(w.n)}</b><small>${esc(setsTxt(w))}${w.t === 'f' ? ` · ${fmt(volume(w.sets))} kg` : ''}</small></div>
-      <span class="kc o">${fmt(w.kcal)}</span>
+      <span class="kc o">${fmt(wKcal(w, ui.date))}</span>
       <button class="x" data-a="editex" data-id="${w.id}" aria-label="Editar">✎</button>
       <button class="x" data-a="delex" data-id="${w.id}" aria-label="Borrar">✕</button></div>`).join('')}
   </section>`;
@@ -690,6 +784,7 @@ function vProg() {
   }
   const bw = sess.length && sess.every(s => !s.e);
   return `
+  ${adjCard(true)}
   <section class="card"><h3>Últimos 7 días</h3>
     <div class="split">
       <div><span>Comido / día</span><b>${fmt(avg(d => d.in))}</b></div>
@@ -697,7 +792,7 @@ function vProg() {
       <div><span>Proteína / día</span><b>${r0(avg(d => d.p))} g</b></div>
       <div><span>Entrenos</span><b>${l7.filter(d => d.tr).length}</b></div>
     </div>
-    ${logged.length ? `<p class="small mute">Balance medio: <b>${fmt(avg(d => d.in - d.out))}</b> kcal/día ≈ ${r1(avg(d => d.in - d.out) * 7 / 7700)} kg/semana</p>` : '<p class="hint">Registra comidas para ver tus promedios.</p>'}
+    ${logged.length ? `<p class="small mute">Balance medio: <b>${fmt(avg(d => d.in - d.out))}</b> kcal/día ≈ ${r1(avg(d => d.in - d.out) * 7 / kcalPerKg(today()))} kg/semana</p>` : '<p class="hint">Registra comidas para ver tus promedios.</p>'}
   </section>
   <section class="card"><h3>Calorías · 14 días</h3>${barChart(data)}</section>
   <section class="card"><h3>Peso corporal</h3>${lineChart(weights, 'kg')}</section>
@@ -760,7 +855,8 @@ function vPerfil() {
     st = `<div class="split">
       <div><span>Metabolismo basal</span><b>${fmt(t.bmr)}</b></div>
       <div><span>Gasto sin entrenar</span><b>${fmt(t.base)}</b></div>
-      <div><span>Comer (día descanso)</span><b>${fmt(t.base + GOALS[p.goal].adj)}</b></div></div>`;
+      <div><span>Comer (día descanso)</span><b>${fmt(t.base + GOALS[p.goal].adj)}</b></div>
+      ${t.adj ? `<div><span>Ajuste por tu peso real</span><b>${signK(t.adj)}</b></div>` : ''}</div>`;
   }
   return `${S.profile || ui.recovery ? vCuenta() : ''}
   <section class="card">
@@ -1029,6 +1125,17 @@ const ACT = {
     save(); render();
   },
 
+  // Ajuste automático según el peso real
+  adjapply: el => {
+    const v = +el.dataset.v; if (!S.profile || !isFinite(v)) return;
+    Object.assign(S.profile, { adj: v, adjAt: today() }); delete S.profile.adjSkip;
+    save(); toast(`✓ Ajuste aplicado: ${signK(v)} kcal/día`); render();
+  },
+  adjskip: () => { S.profile.adjSkip = today(); save(); toast('Te lo vuelvo a proponer en una semana'); render(); },
+  adjreset: () => {
+    if (!confirm('¿Quitar el ajuste y volver a usar solo la fórmula?')) return;
+    S.profile.adj = 0; delete S.profile.adjAt; save(); toast('Ajuste quitado'); render();
+  },
   saveprof: () => {
     const p = {
       sex: $('#pf-sex').value, age: num($('#pf-age').value), height: num($('#pf-h').value), weight: num($('#pf-w').value),
@@ -1036,7 +1143,7 @@ const ACT = {
     };
     if (p.age < 10 || p.height < 100 || p.weight < 30) return toast('Revisa edad, altura y peso');
     const first = !S.profile;
-    S.profile = p; dayW(today()).weight = p.weight; save();
+    S.profile = { ...(S.profile || {}), ...p }; dayW(today()).weight = p.weight; save(); // conserva el ajuste automático
     toast(first ? '¡Listo! Empecemos' : 'Datos guardados');
     if (first) ui.tab = 'hoy';
     render();

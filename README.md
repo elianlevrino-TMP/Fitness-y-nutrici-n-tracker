@@ -4,11 +4,27 @@ App web (PWA) para registrar comidas y entrenos y ver el balance calórico del d
 Sin servidor, sin base de datos en la nube, sin librerías: los datos viven en el teléfono.
 
 ## Cómo calcula
-- **Basal (BMR)**: fórmula Mifflin-St Jeor con tu peso más reciente.
-- **Gasto sin entreno** = BMR × factor de actividad diaria (sin contar el gimnasio).
-- **Gasto del entreno** = MET del ejercicio × peso (kg) × horas. Fuerza: 3 min por serie si no indicas duración.
+- **Basal (BMR)**: Mifflin-St Jeor (1990) con tu peso más reciente. Es la ecuación que más veces acierta
+  dentro de ±10% del valor medido (revisión sistemática de Frankenfield et al., J Am Diet Assoc 2005).
+- **Gasto sin entreno** = BMR × factor de actividad diaria (1,2 / 1,375 / 1,55 / 1,725, sin contar el gimnasio;
+  dentro de los rangos de nivel de actividad de las Dietary Reference Intakes, IOM 2005).
+- **Gasto del entreno** (solo lo que suma por encima del reposo, como en las DRI del IOM 2005):
+  kcal = (MET − 1) × (1,15 / 0,9) × minutos / 1440 × BMR. MET del Compendium of Physical Activities.
+  Fuerza: 3 min por serie si no indicas duración.
 - **Objetivo de comida** = gasto total del día + ajuste (−400 perder grasa / 0 / +300 ganar músculo).
-- **Macros**: proteína = g/kg elegido, grasas = 0,8 g/kg, carbohidratos = el resto.
+  −400 kcal da ≈ 0,5% del peso por semana en una persona promedio, el ritmo que recomiendan las revisiones para
+  conservar masa muscular (Helms et al. 2014). Para ganar músculo no hay un superávit exacto establecido
+  (Slater et al. 2019); +300 es una opción moderada para limitar la ganancia de grasa.
+- **Macros**: proteína = 1,6–2,2 g/kg (Morton et al., Br J Sports Med 2018: el beneficio se estabiliza
+  alrededor de 1,6 g/kg); grasas = 25% de las calorías (rango aceptable 20–35%, IOM 2005); carbohidratos = el resto.
+- **Ajuste según tu peso real**: con 3 semanas de datos (≥10 días completos y ≥4 pesajes separados por ≥14 días),
+  gasto real = lo que comiste en promedio − (tendencia del peso en kg/día × energía por kg). Es el método de
+  balance de ingesta (validado con agua doblemente marcada en CALERIE, de Jonge et al. 2007).
+  La energía por kg no es un 7700 fijo: 1 kg de grasa ≈ 9441 kcal y 1 kg de masa magra ≈ 1816 kcal
+  (Hall et al., Lancet 2011), y la proporción sale de la ecuación de Forbes (Hall, Br J Nutr 2007) con tu
+  grasa corporal estimada por IMC, edad y sexo (Deurenberg et al., Br J Nutr 1991).
+  La diferencia con la fórmula se propone como corrección del gasto (de a ±250 kcal por semana, máximo ±600)
+  y solo se aplica si aceptas. Si registras menos de lo que comes, el ajuste también lo compensa.
 - **Comida**: valores por 100 g × gramos / 100.
 - **Fuerza**: 1RM estimado con Epley (kg × (1 + reps/30)).
 
