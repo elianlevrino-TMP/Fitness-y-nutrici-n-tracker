@@ -200,3 +200,4 @@ input:focus, select:focus { outline: none; border-color: var(--acc); }
 .scan > .srow, .scan > .btn { width: 100%; max-width: 480px; margin: 0 auto; }
 
 .ver { text-align: center; font-size: 12px; color: var(--mute); margin: 4px 0 16px; }
+.chip.alt { background: transparent; border: 1px dashed var(--line); color: var(--acc); }

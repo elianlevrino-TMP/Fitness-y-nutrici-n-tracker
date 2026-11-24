@@ -1,5 +1,5 @@
 // Service worker: la app funciona sin internet y solo descarga cambios cuando los hay.
-const CACHE = 'fitlog-v8';
+const CACHE = 'fitlog-v9';
 const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'data.js', 'sync.js', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
