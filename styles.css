@@ -205,3 +205,9 @@ input:focus, select:focus { outline: none; border-color: var(--acc); }
 .chk input { width: auto; margin: 2px 0 0; }
 .btn.photo { display: flex; justify-content: center; margin: 8px 0 4px; cursor: pointer; }
 .src.ai { color: var(--acc); }
+/* Plan de comidas */
+.chip.on { background: var(--acc); color: var(--acc-ink); border-color: var(--acc); }
+.pm { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
+.pm .grid2 { margin-top: 6px; }
+.pact { margin: 0 0 8px; }
+.mrow:disabled { cursor: default; opacity: .75; }

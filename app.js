@@ -20,7 +20,7 @@ const dayLabel = k => {
 };
 
 /* ================= Constantes ================= */
-const APP_V = 12; // subirla junto con CACHE en sw.js en cada publicación
+const APP_V = 13; // subirla junto con CACHE en sw.js en cada publicación
 const MEALS = [['des', 'Desayuno'], ['alm', 'Almuerzo'], ['mer', 'Merienda'], ['cen', 'Cena'], ['snk', 'Snack']];
 const ACTS = [
   [1.2, 'Sedentario (oficina, casi no camino)'],
@@ -42,7 +42,7 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('⚠️ No se pudo guardar'); }
   Sync.schedule();
 }
-function getDay(k) { const d = S.days[k]; return { meals: d?.meals || [], work: d?.work || [], weight: d?.weight || 0 }; }
+function getDay(k) { const d = S.days[k]; return { meals: d?.meals || [], work: d?.work || [], weight: d?.weight || 0, plan: d?.plan || null }; }
 function dayW(k) { const d = (S.days[k] ||= {}); d.meals ||= []; d.work ||= []; return d; }
 
 const allFoods = () => S.foods.concat(FOODS);
@@ -438,7 +438,8 @@ function vComida() {
   const prev = !d.meals.length && getDay(addDays(ui.date, -1)).meals.length;
   return mealsCard('Comidas del día')
     + (d.meals.length ? `<section class="card tot"><span>Total del día</span><b>${fmt(t.k)} kcal</b><small>P ${r0(t.p)} g · C ${r0(t.c)} g · G ${r0(t.f)} g</small></section>` : '')
-    + (prev ? '<section class="card"><p class="hint">Aún no hay comidas este día.</p><button class="btn wide" data-a="copyprev">Copiar comidas del día anterior</button></section>' : '');
+    + (prev ? '<section class="card"><p class="hint">Aún no hay comidas este día.</p><button class="btn wide" data-a="copyprev">Copiar comidas del día anterior</button></section>' : '')
+    + planCard();
 }
 function editPrev() {
   const m = getDay(ui.date).meals.find(x => x.id === ui.editMeal); if (!m) return '';
@@ -479,7 +480,7 @@ function vMeal() {
   </section>
   <section class="card">
     <h3>Añadir a ${l}</h3>
-    ${ui.food || ui.newFood ? '' : `<div class="srow"><input id="fq" class="search" type="search" placeholder="Buscar: pollo, arroz, huevo…" value="${esc(ui.foodQ)}" autocomplete="off">
+    ${ui.food || ui.newFood ? '' : planHint(k) + `<div class="srow"><input id="fq" class="search" type="search" placeholder="Buscar: pollo, arroz, huevo…" value="${esc(ui.foodQ)}" autocomplete="off">
       <button class="btn scanb" data-a="scan" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>`}
     <div id="fsug">${foodSug()}</div>
     ${foodForm()}${newFoodForm()}
@@ -554,6 +555,223 @@ function vRecipe() {
     <button class="btn pri wide" data-a="saverec">Guardar receta</button>
     ${r.id ? '<button class="btn danger wide" data-a="delrec">Borrar receta</button>' : ''}
   </section>`;
+}
+
+/* ---------- Plan de comidas automático ----------
+   Arma las comidas del día con alimentos comunes del USDA y calcula las cantidades para llegar a tu objetivo
+   de calorías y macros (mínimos cuadrados con límites razonables por alimento; luego se redondea a porciones
+   prácticas: unidades enteras, de a 50 ml, de a 5 o 10 g).
+   - Proteína repartida pareja entre las comidas principales: Schoenfeld & Aragon 2018 (J Int Soc Sports Nutr)
+     recomiendan ≈0,4–0,55 g/kg por comida en al menos 4 comidas para llegar a 1,6–2,2 g/kg al día.
+   - Calorías: reparto habitual 25 / 35 / 15 / 25 % (desayuno / almuerzo / merienda / cena); no hay un
+     reparto "óptimo" demostrado, lo que importa es el total del día. */
+const PLAN_KS = { des: 25, alm: 35, mer: 15, cen: 25, snk: 10 };    // % de las calorías
+const PLAN_PS = { des: 1, alm: 1, mer: 0.75, cen: 1, snk: 0.5 };    // peso de cada comida en la proteína
+// Límites por alimento (nº de ficha USDA): [mín, máx, modo] — modo 'u' = unidades, 'ml', o gramos
+const PLAN_B = {
+  171287: [1, 4, 'u'], 170894: [100, 350], 171284: [100, 300], 172179: [50, 200], 171248: [50, 150], 173864: [1, 4, 'u'],
+  171269: [150, 400, 'ml'], 171265: [150, 350, 'ml'], 172688: [1, 4, 'u'], 174924: [1, 4, 'u'], 170250: [2, 6, 'u'],
+  169705: [20, 90], 171646: [20, 60],
+  173944: [1, 2, 'u'], 171688: [1, 2, 'u'], 169097: [1, 2, 'u'], 169105: [1, 3, 'u'], 169118: [1, 2, 'u'], 167762: [80, 250], 171711: [50, 150],
+  172470: [10, 30], 170567: [10, 30], 170187: [10, 30], 171705: [30, 100],
+  171477: [80, 250], 170208: [80, 220], 168250: [80, 220], 175161: [100, 280], 175168: [80, 200], 171986: [60, 200], 172388: [80, 220],
+  172421: [120, 350], 173757: [100, 300], 173735: [120, 350], 172475: [100, 250],
+  168878: [60, 350], 169704: [60, 350], 169737: [60, 320], 170440: [100, 400], 168484: [100, 350], 168917: [60, 300],
+  169967: [100, 250], 169292: [100, 250], 170127: [100, 250], 169249: [40, 100], 170457: [1, 2, 'u'],
+  171413: [5, 20], 172183: [0, 4, 'u'], 173180: [0, 40], 173424: [1, 4, 'u'],
+};
+const PLAN_WHEY = 173180; // solo se propone si ya la registraste alguna vez
+const PLAN_MEAT = new Set([173864, 171477, 170208, 168250, 175161, 175168, 171986, 172388]); // se quitan si es vegetariano
+const P_FRUIT = [[173944], [171688], [169097], [169105], [169118]];
+const P_BERRY = [[167762], [171711], [173944]];
+const P_STARCH = [[168878], [169704], [169737], [170440], [168484], [168917]];
+const P_VEG = [[169967], [169292], [170127], [169249, 170457]];
+// Plantillas: cada "hueco" (p proteína, c carbohidrato, x fruta, v verdura, f grasa, m extra) tiene opciones;
+// una opción puede ser más de un alimento (ensalada = lechuga + tomate). p y c son obligatorios.
+// "m" es un extra opcional para completar la proteína: si no hace falta, queda en 0 y no se muestra.
+const PLAN_T = {
+  des: [
+    { p: [[171287]], c: [[172688], [174924]], x: P_FRUIT, f: [[171705]], m: [[172183]] },
+    { p: [[170894], [171284]], c: [[169705], [171646]], x: P_BERRY, f: [[170567], [170187]], m: [[PLAN_WHEY]] },
+    { p: [[171269], [171265]], c: [[169705]], x: [[173944], [171688]], f: [[172470]], m: [[PLAN_WHEY]] },
+    { p: [[172179], [171248]], c: [[172688], [170250]], m: [[173864]], x: P_FRUIT },
+  ],
+  main: [
+    { p: [[171477], [170208], [168250], [175161], [175168], [171986], [172388], [173424]], c: P_STARCH.concat([[172421], [173757]]), v: P_VEG, f: [[171413]] },
+  ],
+  veg: [ // almuerzo / cena vegetariano (con huevo y lácteos)
+    { p: [[172475], [173424], [172421], [173757], [173735]], c: P_STARCH, v: P_VEG, f: [[171413]], m: [[173424], [172183]] },
+  ],
+  snk: [
+    { c: P_FRUIT, f: [[170567], [170187]] },
+    { p: [[170894]], x: P_BERRY },
+  ],
+};
+const planPrefs = () => ({ meals: ['des', 'alm', 'mer', 'cen'], veg: false, avoid: [], ...(S.profile?.plan || {}) });
+const planKind = (m, veg) => m === 'alm' || m === 'cen' ? (veg ? 'veg' : 'main') : m === 'snk' ? 'snk' : 'des';
+const pick1 = a => a[Math.floor(Math.random() * a.length)];
+const fdcOf = fid => +String(fid).slice(2);
+// Objetivo de cada comida: calorías y grasas según el reparto, proteína pareja, carbohidratos = el resto
+function planTargets(k, meals) {
+  const t = totals(k), ks = meals.reduce((a, m) => a + PLAN_KS[m], 0), ps = meals.reduce((a, m) => a + PLAN_PS[m], 0), T = {};
+  for (const m of meals) {
+    const kc = t.goal * PLAN_KS[m] / ks, p = t.tP * PLAN_PS[m] / ps, f = t.tF * PLAN_KS[m] / ks;
+    T[m] = { k: kc, p, f, c: Math.max(0, (kc - 4 * p - 9 * f) / 4) };
+  }
+  return T;
+}
+// Opciones válidas de un hueco según tus preferencias
+function planChoices(tpl, s) {
+  const pr = planPrefs(), av = new Set(pr.avoid);
+  const whey = () => sortedDays().some(k => getDay(k).meals.some(m => fdcOf(foodById(m.fid)?.id || m.fid) === PLAN_WHEY));
+  return (tpl[s] || []).filter(ch => ch.every(id => !av.has(id) && !(pr.veg && PLAN_MEAT.has(id)) && foodById('u:' + id) && (id !== PLAN_WHEY || whey())));
+}
+// Elige alimentos para una comida: sin repetir la proteína de "no" y distinta de "diff" si se puede
+function planPick(m, no = [], diff = null) {
+  const kind = planKind(m, planPrefs().veg), key = its => its.map(i => i.fid).sort().join();
+  let best = null;
+  for (let n = 0; n < 40; n++) {
+    const ti = Math.floor(Math.random() * PLAN_T[kind].length), tpl = PLAN_T[kind][ti], items = [];
+    let bad = false;
+    for (const s of Object.keys(tpl)) {
+      let cs = planChoices(tpl, s);
+      const free = cs.filter(ch => !ch.some(id => no.includes(id)));
+      if (s === 'p' && free.length) cs = free;
+      if (!cs.length) { if (s === 'p' || s === 'c') { bad = true; break; } continue; }
+      for (const id of pick1(cs)) if (!items.some(i => i.fid === 'u:' + id)) items.push({ fid: 'u:' + id, s });
+    }
+    if (bad) continue;
+    best = { kind, t: ti, items };
+    if (!diff || key(items) !== key(diff)) break;
+  }
+  return best;
+}
+// Cantidades: minimiza la diferencia relativa con el objetivo de calorías y macros, dentro de los límites
+function planSolve(xs, T) {
+  const W = { k: 3, p: 3, c: 1, f: 1.5 }, sc = { k: Math.max(T.k, 100), p: Math.max(T.p, 10), c: Math.max(T.c, 15), f: Math.max(T.f, 5) };
+  for (let it = 0; it < 80; it++) for (const x of xs) {
+    if (x.fixed) continue;
+    let a = 0, b = 0;
+    for (const t of 'kpcf') {
+      const rest = xs.reduce((s, y) => y === x ? s : s + y.d[t] * y.g / 100, 0), q = x.d[t] / 100 / sc[t];
+      a += W[t] * q * (rest - T[t]) / sc[t]; b += W[t] * q * q;
+    }
+    x.g = b > 0 ? clamp(-a / b, x.lo, x.hi) : x.lo;
+  }
+}
+function planFit(items, T) {
+  const big = clamp(T.k / 700, 1, 1.6);     // comidas grandes (objetivos altos): porciones máximas más grandes
+  const small = clamp(T.k / 450, 0.5, 1);   // comidas chicas: porciones mínimas más chicas
+  const xs = items.map(it => {
+    const d = foodById(it.fid), b = PLAN_B[d.fdc] || [50, 200], mode = fixMode(d, b[2] || 'g'), fx = factor(d, mode);
+    const step = mode === 'u' ? fx : mode === 'ml' ? 50 * fx : d.k >= 300 ? 5 : 10;
+    const lo = it.s === 'm' ? 0 : b[0] * fx * (mode === 'u' ? 1 : small), hi = Math.max(b[1] * fx * (it.s === 'v' || it.s === 'x' ? 1 : big), lo);
+    return { it, d, mode, fx, step, lo, hi, g: (lo + hi) / 2 };
+  });
+  planSolve(xs, T);
+  // redondeo a porciones prácticas, empezando por lo más grueso (unidades) y reajustando el resto
+  for (const x of [...xs].sort((a, b) => b.step - a.step)) {
+    const lo = Math.ceil(x.lo / x.step - 1e-6) * x.step, hi = Math.floor(x.hi / x.step + 1e-6) * x.step;
+    x.g = clamp(Math.round(x.g / x.step) * x.step, lo, hi); x.fixed = true;
+    planSolve(xs, T);
+  }
+  return xs.map(x => setQty({ fid: x.it.fid, s: x.it.s, g: r1(x.g) }, x.mode, x.g / x.fx));
+}
+function planMeal(m, T, no, diff) {
+  const p = planPick(m, no, diff);
+  return p && { kind: p.kind, t: p.t, items: planFit(p.items, T[m]) };
+}
+const planShown = pm => pm.items.map((i, n) => [i, n]).filter(([i]) => i.g > 0); // los extras en 0 no se muestran
+// Las comidas se calculan por separado y cada una queda un poco arriba o abajo: este paso reparte la
+// diferencia con el objetivo del DÍA entre las comidas que se pueden cambiar (ms), y las recalcula.
+function planBalance(k, plan, ms) {
+  ms = ms.filter(m => plan.meals[m] && !plan.meals[m].done);
+  if (!ms.length) return;
+  const t = totals(k), D = { k: t.goal, p: t.tP, c: t.tC, f: t.tF }, T = planTargets(k, Object.keys(plan.meals));
+  const ws = ms.reduce((a, m) => a + PLAN_KS[m], 0);
+  for (let it = 0; it < 3; it++) {
+    const s = mealSum(Object.values(plan.meals).map(planMacros));
+    for (const m of ms) {
+      const pm = plan.meals[m], cur = planMacros(pm), w = PLAN_KS[m] / ws, tg = {};
+      for (const q of 'kpcf') tg[q] = clamp(cur[q] + (D[q] - s[q]) * w, T[m][q] * 0.6, T[m][q] * 1.5);
+      pm.items = planFit(pm.items.map(i => ({ fid: i.fid, s: i.s })), tg);
+    }
+  }
+}
+const planProt = pm => pm ? pm.items.filter(i => i.s === 'p').map(i => fdcOf(i.fid)) : [];
+const planOther = (plan, m) => m === 'alm' ? planProt(plan.meals.cen) : m === 'cen' ? planProt(plan.meals.alm) : [];
+// Arma (o rehace) el plan de un día. Las comidas ya cargadas se mantienen.
+function planMake(k) {
+  const pr = planPrefs(), d = dayW(k), old = d.plan?.meals || {}, T = planTargets(k, pr.meals);
+  const plan = { goal: r0(totals(k).goal), meals: {} };
+  for (const m of pr.meals) {
+    if (old[m]?.done) { plan.meals[m] = old[m]; continue; }
+    const pm = planMeal(m, T, planOther(plan, m), old[m]?.items);
+    if (pm) plan.meals[m] = pm;
+  }
+  planBalance(k, plan, Object.keys(plan.meals));
+  d.plan = plan;
+}
+const planMacros = pm => mealSum(pm.items.map(itemMacro));
+function planItemsToDay(k, m, pm) {
+  const d = dayW(k);
+  for (const [i] of planShown(pm)) {
+    const f = foodById(i.fid), x = itemMacro(i);
+    d.meals.push({ id: uid(), meal: m, fid: i.fid, n: f ? f.n : i.fid, g: i.g, ...(i.un ? { un: i.un } : {}), ...(i.vol ? { vol: i.vol } : {}), k: r1(x.k), p: r1(x.p), c: r1(x.c), f: r1(x.f) });
+  }
+  pm.done = true;
+}
+function planOpts() {
+  const pr = planPrefs();
+  return `<div class="sel">
+    <p class="lbl">Comidas del plan</p>
+    <div class="chips">${MEALS.map(([k, l]) => `<button class="chip${pr.meals.includes(k) ? ' on' : ''}" data-a="planmeal" data-m="${k}">${l}</button>`).join('')}</div>
+    <label class="chk"><input id="plan-veg" type="checkbox"${pr.veg ? ' checked' : ''}> Vegetariano (con huevo y lácteos)</label>
+    ${pr.avoid.length ? `<p class="lbl">No me gustan (toca para volver a incluir)</p>
+      <div class="chips">${pr.avoid.map(id => `<button class="chip" data-a="planunavoid" data-id="${id}">${esc(foodById('u:' + id)?.n || id)} ✕</button>`).join('')}</div>` : ''}
+    <p class="small mute">Los cambios se usan al armar otro plan.</p>
+  </div>`;
+}
+function planCard() {
+  const plan = getDay(ui.date).plan;
+  const opts = ui.planOpts ? planOpts() : '', optLink = `<button class="link" data-a="planopts">${ui.planOpts ? 'Cerrar ajustes' : 'Ajustes del plan'}</button>`;
+  if (!plan) return `<section class="card"><h3>Plan automático</h3>
+    <p class="small mute">Arma las comidas del día con alimentos comunes y las cantidades justas para tu objetivo. Después las cargas con un toque.</p>
+    <button class="btn pri wide" data-a="plannew">Armar mi plan del día</button>${optLink}${opts}</section>`;
+  const t = totals(ui.date), ms = MEALS.map(x => x[0]).filter(m => plan.meals[m]);
+  const s = mealSum(ms.map(m => planMacros(plan.meals[m])));
+  const changed = Math.abs(r0(t.goal) - plan.goal) >= 100 && ms.some(m => !plan.meals[m].done);
+  return `<section class="card plan">
+    <div class="cardh"><h3>Plan del día</h3><b>${fmt(s.k)} kcal</b></div>
+    <p class="small mute">Objetivo ${fmt(t.goal)} kcal · P ${r0(s.p)}/${r0(t.tP)} g · C ${r0(s.c)}/${r0(t.tC)} g · G ${r0(s.f)}/${r0(t.tF)} g</p>
+    ${changed ? `<div class="sel"><p class="small">Tu objetivo cambió a <b>${fmt(t.goal)} kcal</b> (por ejemplo, por un entreno).</p>
+      <button class="btn wide" data-a="planfit">Ajustar las cantidades</button></div>` : ''}
+    ${ms.map(m => {
+      const pm = plan.meals[m], x = planMacros(pm);
+      return `<div class="pm"><div class="cardh"><b>${mealName(m)}</b><span class="mute">${fmt(x.k)} kcal${pm.done ? ' · ✓ cargado' : ''}</span></div>
+        ${planShown(pm).map(([i, n]) => {
+          const f = foodById(i.fid), sel = ui.planSel === `${m}:${n}`;
+          return `<button class="mrow" data-a="planitem" data-m="${m}" data-i="${n}"${pm.done ? ' disabled' : ''}>
+            <div class="grow"><b>${esc(f?.n || i.fid)}</b><small>${qtyTxt(i)}</small></div><span class="kc">${fmt(itemMacro(i).k)}</span></button>
+            ${sel && !pm.done ? `<div class="grid2 pact"><button class="btn" data-a="planswap" data-m="${m}" data-i="${n}">↻ Cambiar</button><button class="btn" data-a="planavoid" data-m="${m}" data-i="${n}">✕ No me gusta</button></div>` : ''}`;
+        }).join('')}
+        ${pm.done ? '' : `<div class="grid2"><button class="btn" data-a="planre" data-m="${m}">↻ Otra opción</button><button class="btn pri" data-a="planload" data-m="${m}">✓ Cargar</button></div>`}
+      </div>`;
+    }).join('')}
+    ${ms.some(m => !plan.meals[m].done) ? `<div class="grid2"><button class="btn" data-a="plannew">↻ Otro plan</button><button class="btn pri" data-a="planall">Cargar todo</button></div>` : ''}
+    <div class="links">${optLink}<button class="link" data-a="plandel">Borrar el plan</button></div>
+    ${opts}
+    <p class="small mute">Toca un alimento para cambiarlo. Cantidades calculadas para tu objetivo con los valores del USDA.</p>
+  </section>`;
+}
+// En una comida abierta: lo que sugiere el plan, para cargarlo con un toque
+function planHint(m) {
+  const pm = getDay(ui.date).plan?.meals?.[m];
+  if (!pm || pm.done) return '';
+  const q = i => i.un ? `${fmtN(i.un)} ${unitWord(foodById(i.fid), i.un)}` : i.vol ? `${fmtN(i.vol)} ml` : `${r0(i.g)} g`;
+  return `<div class="sel"><div class="cardh"><b>Según tu plan</b><span class="mute">${fmt(planMacros(pm).k)} kcal</span></div>
+    <p class="small">${planShown(pm).map(([i]) => `${esc(foodById(i.fid)?.n || '')} (${q(i)})`).join(' · ')}</p>
+    <button class="btn pri wide" data-a="planload" data-m="${m}">✓ Cargar esto</button></div>`;
 }
 
 /* ---------- Escáner de código de barras + Open Food Facts ---------- */
@@ -918,6 +1136,24 @@ function toast(m) { const el = $('#toast'); el.textContent = m; el.classList.add
 const focus = (id, sel) => { const el = $(id); if (el) { el.focus(); if (sel) el.select?.(); } };
 
 /* ================= Acciones ================= */
+const setPlanPrefs = pr => { S.profile.plan = pr; save(); };
+// Cambiar un alimento del plan por otro del mismo tipo (o quitarlo si no te gusta y no hay reemplazo)
+function planSwap(m, i, avoid) {
+  const plan = dayW(ui.date).plan, pm = plan?.meals[m], it = pm?.items[i]; if (!it) return;
+  const id = fdcOf(it.fid), name = foodById(it.fid)?.n || '';
+  if (avoid) { const pr = planPrefs(); if (!pr.avoid.includes(id)) pr.avoid.push(id); S.profile.plan = pr; }
+  const tpl = PLAN_T[pm.kind]?.[pm.t], cur = pm.items.filter(x => x.s === it.s).map(x => fdcOf(x.fid)).join();
+  let cs = tpl ? planChoices(tpl, it.s).filter(ch => ch.join() !== cur) : [];
+  if (it.s === 'p') { const no = planOther(plan, m), free = cs.filter(ch => !ch.some(x => no.includes(x))); if (free.length) cs = free; }
+  const T = planTargets(ui.date, Object.keys(plan.meals)), keep = pm.items.filter(x => x.s !== it.s).map(x => ({ fid: x.fid, s: x.s }));
+  if (cs.length) {
+    keep.splice(pm.items.findIndex(x => x.s === it.s), 0, ...pick1(cs).map(x => ({ fid: 'u:' + x, s: it.s })));
+    pm.items = planFit(keep, T[m]);
+  } else if (!avoid) { ui.planSel = null; render(); return toast('No hay otro parecido: prueba “Otra opción”'); }
+  else if (it.s !== 'p' && it.s !== 'c') pm.items = planFit(keep, T[m]);
+  else { const nm = planMeal(m, T, planOther(plan, m), pm.items); if (nm) plan.meals[m] = nm; }
+  planBalance(ui.date, plan, [m]); save(); ui.planSel = null; toast(avoid ? `No te vuelvo a proponer: ${name}` : '↻ Cambiado'); render();
+}
 const ACT = {
   tab: el => { ui.tab = el.dataset.t; ui.mealOpen = null; ui.editMeal = null; ui.saveCombo = false; ui.rec = null; render(); scrollTo(0, 0); },
   day: el => { ui.date = addDays(ui.date, +el.dataset.n); ui.editId = null; ui.exSel = null; ui.editMeal = null; ui.saveCombo = false; render(); },
@@ -928,6 +1164,50 @@ const ACT = {
     render(); scrollTo(0, 0);
   },
   closemeal: () => { Object.assign(ui, { mealOpen: null, editMeal: null, food: null, newFood: false, saveCombo: false }); render(); scrollTo(0, 0); },
+
+  // Plan de comidas automático
+  plannew: () => {
+    const had = !!getDay(ui.date).plan;
+    planMake(ui.date); save(); ui.planSel = null; ui.planOpts = false;
+    toast(had ? '↻ Plan nuevo' : '✓ Plan armado'); render();
+  },
+  planre: el => {
+    const m = el.dataset.m, plan = dayW(ui.date).plan; if (!plan?.meals[m]) return;
+    const pm = planMeal(m, planTargets(ui.date, Object.keys(plan.meals)), planOther(plan, m), plan.meals[m].items);
+    if (pm) { plan.meals[m] = pm; planBalance(ui.date, plan, [m]); }
+    save(); ui.planSel = null; render();
+  },
+  planitem: el => { const k = `${el.dataset.m}:${el.dataset.i}`; ui.planSel = ui.planSel === k ? null : k; render(); },
+  planswap: el => planSwap(el.dataset.m, +el.dataset.i, false),
+  planavoid: el => planSwap(el.dataset.m, +el.dataset.i, true),
+  planload: el => {
+    const m = el.dataset.m, pm = dayW(ui.date).plan?.meals[m]; if (!pm || pm.done) return;
+    planItemsToDay(ui.date, m, pm); save(); toast(`✓ ${mealName(m)} cargado · ${fmt(planMacros(pm).k)} kcal`); render();
+  },
+  planall: () => {
+    const plan = dayW(ui.date).plan; if (!plan) return;
+    let n = 0;
+    for (const [m] of MEALS) { const pm = plan.meals[m]; if (pm && !pm.done) { planItemsToDay(ui.date, m, pm); n++; } }
+    save(); toast(`✓ ${n} comidas cargadas`); render();
+  },
+  planfit: () => {
+    const plan = dayW(ui.date).plan; if (!plan) return;
+    const T = planTargets(ui.date, Object.keys(plan.meals));
+    for (const [m, pm] of Object.entries(plan.meals)) if (!pm.done) pm.items = planFit(pm.items.map(i => ({ fid: i.fid, s: i.s })), T[m]);
+    planBalance(ui.date, plan, Object.keys(plan.meals)); plan.goal = r0(totals(ui.date).goal); save(); toast('✓ Cantidades ajustadas'); render();
+  },
+  plandel: () => {
+    if (!confirm('¿Borrar el plan de este día? (Lo que ya cargaste se mantiene)')) return;
+    delete dayW(ui.date).plan; ui.planSel = null; save(); render();
+  },
+  planopts: () => { ui.planOpts = !ui.planOpts; render(); },
+  planmeal: el => {
+    const pr = planPrefs(), m = el.dataset.m, on = pr.meals.includes(m);
+    if (on && pr.meals.length <= 3) return toast('El plan necesita al menos 3 comidas');
+    pr.meals = MEALS.map(x => x[0]).filter(k => k === m ? !on : pr.meals.includes(k));
+    setPlanPrefs(pr); render();
+  },
+  planunavoid: el => { const pr = planPrefs(); pr.avoid = pr.avoid.filter(x => x !== +el.dataset.id); setPlanPrefs(pr); render(); },
 
   // Comidas guardadas
   askcombo: () => { ui.saveCombo = true; render(); focus('#cn', true); },
@@ -1229,6 +1509,7 @@ document.addEventListener('change', e => {
   if (t.id === 'fm') ui.meal = t.value;
   else if (t.id === 'dpick' && t.value) { ui.date = t.value; render(); }
   else if (t.id === 'nf-photo' && t.files[0]) readLabel(t.files[0]);
+  else if (t.id === 'plan-veg') { const pr = planPrefs(); pr.veg = t.checked; setPlanPrefs(pr); render(); }
   else if (t.id === 'pex') { ui.progEx = t.value; render(); }
   else if (t.id === 'wt') {
     const w = num(t.value), d = dayW(ui.date);

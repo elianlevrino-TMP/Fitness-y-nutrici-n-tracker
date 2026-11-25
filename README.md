@@ -25,6 +25,13 @@ Sin servidor, sin base de datos en la nube, sin librerías: los datos viven en e
   grasa corporal estimada por IMC, edad y sexo (Deurenberg et al., Br J Nutr 1991).
   La diferencia con la fórmula se propone como corrección del gasto (de a ±250 kcal por semana, máximo ±600)
   y solo se aplica si aceptas. Si registras menos de lo que comes, el ajuste también lo compensa.
+- **Plan de comidas automático** (pestaña Comida): arma desayuno, almuerzo, merienda y cena (o las comidas
+  que elijas, mínimo 3) con alimentos comunes del USDA y calcula las cantidades para llegar a tu objetivo de
+  calorías y macros del día (mínimos cuadrados con límites razonables por alimento, redondeado a unidades
+  enteras, de a 50 ml o de a 5–10 g). La proteína se reparte pareja entre las comidas principales
+  (≈0,4–0,55 g/kg por comida: Schoenfeld & Aragon, J Int Soc Sports Nutr 2018); las calorías, 25/35/15/25 %
+  (un reparto habitual: lo que más importa es el total del día). Se puede cambiar cualquier alimento,
+  marcar los que no te gustan, elegir vegetariano y cargar cada comida al día con un toque.
 - **Comida**: valores por 100 g × gramos / 100.
 - **Fuerza**: 1RM estimado con Epley (kg × (1 + reps/30)).
 
